@@ -153,4 +153,13 @@ pub fn build(b: *std.Build) void {
     //
     // Lastly, the Zig build system is relatively simple and self-contained,
     // and reading its source code will allow you to master it.
+
+    const exe_mod = exe.root_module;
+    const cham = b.dependency("chameleon", .{});
+    exe_mod.addImport("chameleon", cham.module("chameleon"));
+    mod.addImport("chameleon", cham.module("chameleon"));
+
+    const toml = b.dependency("toml", .{});
+    exe_mod.addImport("toml", toml.module("toml"));
+    mod.addImport("toml", toml.module("toml"));
 }

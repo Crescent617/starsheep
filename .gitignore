@@ -8,7 +8,9 @@
 # Zig programming language
 
 zig-cache/
+.zig-cache/
 zig-out/
+.zig-out/
 build/
 build-*/
 docgen_tmp/

@@ -1,27 +1,57 @@
 const std = @import("std");
 const starsheep = @import("starsheep");
+const chameleon = @import("chameleon");
 
 pub fn main() !void {
     // Prints to stderr, ignoring potential errors.
     std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
     try starsheep.bufferedPrint();
-}
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+    // Chameleon example - colorful terminal output
+    std.debug.print("\n=== Chameleon Examples ===\n", .{});
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    // Example 1: Basic colors using comptime
+    comptime var c = chameleon.initComptime();
+    std.debug.print("{s} {s} {s}\n", .{
+        c.red().fmt("Red"),
+        c.blue().fmt("Blue"),
+        c.green().fmt("Green"),
+    });
+
+    // Example 2: Background colors
+    std.debug.print("{s} {s}\n", .{
+        c.bgYellow().fmt("Yellow background"),
+        c.bgMagenta().fmt("Magenta background"),
+    });
+
+    // Example 3: Styles
+    std.debug.print("{s} {s} {s}\n", .{
+        c.bold().fmt("Bold"),
+        c.italic().fmt("Italic"),
+        c.underline().fmt("Underline"),
+    });
+
+    // Example 4: Combining styles
+    std.debug.print("{s} {s}\n", .{
+        c.bold().red().fmt("Bold red"),
+        c.italic().blue().bgCyan().fmt("Italic blue on cyan"),
+    });
+
+    // Example 5: More complex combinations
+    std.debug.print("{s}\n", .{c.bold().underline().green().fmt("Bold underlined green header")});
+
+    // Example 6: Print methods
+    try c.bold().magenta().printOut("Bold magenta using printOut\n", .{});
+
+    // Example 7: Runtime API with NO_COLOR support
+    var runtime_chameleon = chameleon.initRuntime(.{
+        .allocator = std.heap.page_allocator,
+        .detect_no_color = true,
+    });
+    defer runtime_chameleon.deinit();
+
+    // Runtime styles work the same way as comptime but need format args
+    const runtime_text = try runtime_chameleon.bold().green().fmt("{s}", .{"Runtime style (respects NO_COLOR env var)"});
+    defer std.heap.page_allocator.free(runtime_text);
+    std.debug.print("{s}\n", .{runtime_text});
 }
