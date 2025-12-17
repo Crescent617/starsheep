@@ -1,15 +1,4 @@
 const std = @import("std");
-const Cmd = @import("Cmd.zig");
-
-pub const builtins = [_]Cmd{
-    Cmd{
-        .name = "git_status",
-        .cmd = "",
-        .cmd_fn = null,
-        .when_fn = null,
-        .format = "Listing files in the current directory:",
-    },
-};
 
 pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?std.fs.File.Stat {
     // 先规范化为绝对路径，避免 ".." 等造成判断异常
@@ -21,10 +10,7 @@ pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, file
             return res;
         }
 
-        const parent_opt = std.fs.path.dirname(cur);
-        if (parent_opt == null) break;
-
-        const parent = parent_opt.?;
+        const parent = std.fs.path.dirname(cur) orelse break;
 
         // 根目录时 dirname 往往返回自身，避免死循环
         if (std.mem.eql(u8, parent, cur)) break;

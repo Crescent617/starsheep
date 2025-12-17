@@ -1,56 +1,74 @@
 const Cmd = @This();
 const Self = Cmd;
+const Either = @import("util/types.zig").Either;
+
 const std = @import("std");
+const fmt = @import("fmt.zig");
 
 name: []const u8,
-cmd: []const u8,
-cmd_fn: ?*const fn () []const u8 = null,
-when: ?[]const u8,
-when_fn: ?*const fn () bool = null,
-format: []const u8,
+cmd: Either([]const u8, *const fn () []const u8),
+when: Either([]const u8, *const fn () bool),
+format: ?[]const u8, // use tmux style format strings, e.g. #[fg=blue,bg=black,bold,underscore]
 enabled: bool = true,
 
-pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
-    if (self.when_fn) |when_fn| {
-        return when_fn();
+pub fn run(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
+    if (try self.needsEval(alloc)) {
+        const output = try self.eval(alloc);
+        defer alloc.free(output);
+
+        return try fmt.format(alloc, self.format, output);
     }
-    if (self.when) |when_str| {
-        // execute when_str and check exit code
-        var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", when_str }, alloc);
-        const exit_code = try process.spawnAndWait();
-        return exit_code.Exited == 0;
+    return null;
+}
+
+fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
+    if (!self.enabled) {
+        return false;
     }
-    return true;
+    switch (self.when) {
+        .L => |s| {
+            // execute when_str and check exit code
+            var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", s }, alloc);
+            const exit_code = try process.spawnAndWait();
+            return exit_code.Exited == 0;
+        },
+        .R => |f| {
+            return f();
+        },
+    }
 }
 
 /// Evaluate the 'when' condition and return any output
-pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
-    if (self.cmd_fn) |cmd_fn| {
-        return cmd_fn();
-    }
-    var p = std.process.Child.init(&[_][]const u8{ "sh", "-c", self.cmd }, alloc);
-    p.stdin_behavior = .Ignore;
-    p.stdout_behavior = .Pipe;
-    p.stderr_behavior = .Pipe;
+fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
+    switch (self.cmd) {
+        .L => |cmd_str| {
+            var p = std.process.Child.init(&[_][]const u8{ "sh", "-c", cmd_str }, alloc);
+            p.stdin_behavior = .Ignore;
+            p.stdout_behavior = .Pipe;
+            p.stderr_behavior = .Pipe;
 
-    _ = try p.spawn();
-    defer _ = p.kill() catch |err| {
-        std.log.err("Failed to kill process: {}\n", .{err});
-    };
+            _ = try p.spawn();
+            defer _ = p.kill() catch |err| {
+                std.log.err("Failed to kill process: {}\n", .{err});
+            };
 
-    if (p.stdout) |stdout_pipe| {
-        return try stdout_pipe.readToEndAlloc(alloc, 4096); // max 4KB output
-    } else {
-        return "";
+            if (p.stdout) |stdout_pipe| {
+                return try stdout_pipe.readToEndAlloc(alloc, 4096); // max 4KB output
+            } else {
+                return "";
+            }
+        },
+        .R => |cmd_fn| {
+            return cmd_fn();
+        },
     }
 }
 
 test "Cmd needsEval test" {
     var cmd1 = Cmd{
         .name = "test1",
-        .cmd = "",
-        .when_fn = null,
-        .when = "true",
+        .cmd = .{ .L = "" },
+        .when = .{ .L = "true" },
         .format = "",
         .enabled = true,
     };
@@ -59,9 +77,8 @@ test "Cmd needsEval test" {
 
     var cmd2 = Cmd{
         .name = "test2",
-        .cmd = "",
-        .when_fn = null,
-        .when = "false",
+        .cmd = .{ .L = "" },
+        .when = .{ .L = "false" },
         .format = "",
         .enabled = true,
     };
@@ -80,16 +97,15 @@ fn func_when_false() bool {
 test "Cmd needsEval with function test" {
     var cmd = Cmd{
         .name = "test_func",
-        .cmd = "",
-        .when_fn = func_when_true,
-        .when = null,
+        .cmd = .{ .L = "" },
+        .when = .{ .R = func_when_true },
         .format = "",
         .enabled = true,
     };
     const res = try cmd.needsEval(std.testing.allocator);
     try std.testing.expect(res == true);
 
-    cmd.when_fn = func_when_false;
+    cmd.when = .{ .R = func_when_false };
     const res2 = try cmd.needsEval(std.testing.allocator);
     try std.testing.expect(res2 == false);
 }
@@ -97,9 +113,8 @@ test "Cmd needsEval with function test" {
 test "Cmd eval test" {
     var cmd = Cmd{
         .name = "echo_test",
-        .cmd = "echo Hello, World!",
-        .when_fn = null,
-        .when = null,
+        .cmd = .{ .L = "echo Hello, World!" },
+        .when = .{ .L = "true" },
         .format = "",
         .enabled = true,
     };
@@ -115,10 +130,8 @@ fn func_cmd() []const u8 {
 test "Cmd eval with function test" {
     var cmd = Cmd{
         .name = "func_cmd_test",
-        .cmd = "",
-        .cmd_fn = func_cmd,
-        .when_fn = null,
-        .when = null,
+        .cmd = .{ .R = func_cmd },
+        .when = .{ .L = "true" },
         .format = "",
         .enabled = true,
     };
