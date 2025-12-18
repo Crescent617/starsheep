@@ -1,13 +1,27 @@
 const std = @import("std");
 
-pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?std.fs.File.Stat {
+pub const PathInfo = struct {
+    stat: std.fs.File.Stat,
+    path: []const u8,
+
+    fn deinit(self: *const PathInfo, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+    }
+};
+
+pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?PathInfo {
     // 先规范化为绝对路径，避免 ".." 等造成判断异常
-    var cur = std.fs.cwd().realpathAlloc(allocator, start_dir) catch return null;
-    defer allocator.free(cur);
+    const p = std.fs.cwd().realpathAlloc(allocator, start_dir) catch return null;
+    defer allocator.free(p);
+
+    var cur: []const u8 = p;
 
     while (true) {
         if (statFile(allocator, cur, filename)) |res| {
-            return res;
+            return PathInfo{
+                .stat = res,
+                .path = std.fs.path.join(allocator, &.{ cur, filename }) catch return null,
+            };
         }
 
         const parent = std.fs.path.dirname(cur) orelse break;
@@ -15,16 +29,19 @@ pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, file
         // 根目录时 dirname 往往返回自身，避免死循环
         if (std.mem.eql(u8, parent, cur)) break;
 
-        const next = allocator.dupe(u8, parent) catch return null;
-        allocator.free(cur);
-        cur = next;
+        cur = parent;
     }
 
     return null;
 }
 
 pub fn existsFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) bool {
-    return statFileUpwards(allocator, start_dir, filename) != null;
+    const res = statFileUpwards(allocator, start_dir, filename);
+    if (res) |p| {
+        p.deinit(allocator);
+        return true;
+    }
+    return false;
 }
 
 fn statFile(allocator: std.mem.Allocator, base: []const u8, child: []const u8) ?std.fs.File.Stat {

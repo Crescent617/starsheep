@@ -27,6 +27,9 @@ fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
     }
     switch (self.when) {
         .L => |s| {
+            if (s.len == 0) {
+                return true;
+            }
             // execute when_str and check exit code
             var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", s }, alloc);
             const exit_code = try process.spawnAndWait();
