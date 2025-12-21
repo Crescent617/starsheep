@@ -36,7 +36,7 @@ pub const builtins = [_]Cmd{ .{
 }, .{
     .name = "nix-shell",
     .cmd = .{ .R = nixShell },
-    .format = "#[fg=blue,bold]❄️$output",
+    .format = "#[fg=cyan,bold]❄️$output",
 }, .{
     .name = "go",
     .cmd = .{ .R = goVer },
@@ -49,6 +49,10 @@ pub const builtins = [_]Cmd{ .{
     .name = "node",
     .cmd = .{ .R = nodeVer },
     .format = "#[fg=green,bold] $output",
+}, .{
+    .name = "http_proxy",
+    .cmd = .{ .R = httpProxy },
+    .format = "#[fg=blue,bold] $output",
 } };
 
 fn zigVer(_: std.mem.Allocator) []const u8 {
@@ -144,4 +148,13 @@ fn hostname(alloc: std.mem.Allocator) []const u8 {
     // std.posix.gethostname 在各平台通用
     const name = std.posix.gethostname(&buf) catch "";
     return alloc.dupe(u8, name) catch "";
+}
+
+fn httpProxy(alloc: std.mem.Allocator) []const u8 {
+    const http_proxy = std.process.getEnvVarOwned(alloc, "HTTP_PROXY") catch "";
+    if (http_proxy.len == 0) {
+        const https_proxy = std.process.getEnvVarOwned(alloc, "HTTPS_PROXY") catch "";
+        return https_proxy;
+    }
+    return http_proxy;
 }
