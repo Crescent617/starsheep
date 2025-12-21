@@ -6,22 +6,12 @@ const std = @import("std");
 const fmt = @import("fmt.zig");
 
 name: []const u8,
-cmd: Either([]const u8, *const fn () []const u8),
-when: Either([]const u8, *const fn () bool),
-format: ?[]const u8, // use tmux style format strings, e.g. #[fg=blue,bg=black,bold,underscore]
+cmd: Either([]const u8, *const fn (std.mem.Allocator) []const u8),
+when: Either([]const u8, *const fn (std.mem.Allocator) bool),
+format: ?[]const u8 = null, // use tmux style format strings, e.g. #[fg=blue,bg=black,bold,underscore]
 enabled: bool = true,
 
-pub fn run(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
-    if (try self.needsEval(alloc)) {
-        const output = try self.eval(alloc);
-        defer alloc.free(output);
-
-        return try fmt.format(alloc, self.format, output);
-    }
-    return null;
-}
-
-fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
+pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
     if (!self.enabled) {
         return false;
     }
@@ -36,13 +26,13 @@ fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
             return exit_code.Exited == 0;
         },
         .R => |f| {
-            return f();
+            return f(alloc);
         },
     }
 }
 
 /// Evaluate the 'when' condition and return any output
-fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
+pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
     switch (self.cmd) {
         .L => |cmd_str| {
             var p = std.process.Child.init(&[_][]const u8{ "sh", "-c", cmd_str }, alloc);
@@ -62,7 +52,7 @@ fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
             }
         },
         .R => |cmd_fn| {
-            return cmd_fn();
+            return cmd_fn(alloc);
         },
     }
 }
@@ -89,11 +79,11 @@ test "Cmd needsEval test" {
     try std.testing.expect(res == false);
 }
 
-fn func_when_true() bool {
+fn func_when_true(_: std.mem.Allocator) bool {
     return true;
 }
 
-fn func_when_false() bool {
+fn func_when_false(_: std.mem.Allocator) bool {
     return false;
 }
 
@@ -126,7 +116,7 @@ test "Cmd eval test" {
     try std.testing.expectEqualStrings(output, "Hello, World!\n");
 }
 
-fn func_cmd() []const u8 {
+fn func_cmd(_: std.mem.Allocator) []const u8 {
     return "Function Output\n";
 }
 

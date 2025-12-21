@@ -1,0 +1,5 @@
+[[cmds]]
+name = "date"
+cmd = "date '+%Y-%m-%d %H:%M:%S'"
+format = "#[fg=green] $output"
+enabled = false
