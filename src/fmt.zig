@@ -38,6 +38,14 @@ pub fn format(
                 // 2. 处理 $output 变量替换
                 if (std.mem.startsWith(u8, fmt[i + 1 ..], "output")) {
                     try arr.appendSlice(alloc, out);
+                    while (arr.getLastOrNull()) |last_char| {
+                        if (last_char == '\n') {
+                            // 去掉结尾的换行，避免多余空行
+                            _ = arr.pop();
+                        } else {
+                            break;
+                        }
+                    }
                     // 打印完变量后，通常需要重置样式以防污染后续输出
                     // 如果 chameleon 没有自动重置，可以手动 w.writeAll("\x1b[0m")
                     i += "output".len + 1;

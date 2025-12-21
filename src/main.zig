@@ -2,19 +2,20 @@ const std = @import("std");
 const starsheep = @import("starsheep");
 
 pub fn main() !void {
-    const alloc = std.heap.page_allocator;
+    var gpa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer gpa.deinit();
+
+    const alloc = gpa.allocator();
 
     var app = try starsheep.App.init(alloc);
     defer app.deinit();
 
-    const conf_path = "starsheep.toml";
-    if (statFile(conf_path)) |_| {
-        std.log.debug("Loading configuration from: {s}", .{conf_path});
+    const conf_path = try getConfig(alloc);
+    defer alloc.free(conf_path);
 
-        const conf = try starsheep.Conf.fromTomlFile(alloc, conf_path);
-        defer conf.deinit();
-        try app.applyConfig(&conf.value);
-    }
+    app.applyConfigFile(conf_path) catch |err| {
+        std.log.debug("Failed to apply config file '{s}': {}\n", .{ conf_path, err });
+    };
 
     var buf: [1024]u8 = undefined;
     var writer = std.fs.File.stdout().writer(&buf);
@@ -23,10 +24,8 @@ pub fn main() !void {
     try app.run(&writer.interface);
 }
 
-fn statFile(path: []const u8) ?std.fs.File.Stat {
-    const stat = std.fs.cwd().statFile(path) catch |err| {
-        std.log.err("Failed to stat file '{s}': {}", .{ path, err });
-        return null;
-    };
-    return stat;
+fn getConfig(alloc: std.mem.Allocator) ![]const u8 {
+    const home_dir = try std.process.getEnvVarOwned(alloc, "HOME");
+    defer alloc.free(home_dir);
+    return std.fs.path.join(alloc, &.{ home_dir, ".config", "starsheep.toml" });
 }

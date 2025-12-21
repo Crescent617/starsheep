@@ -7,9 +7,10 @@ const fmt = @import("fmt.zig");
 
 name: []const u8,
 cmd: Either([]const u8, *const fn (std.mem.Allocator) []const u8),
-when: Either([]const u8, *const fn (std.mem.Allocator) bool),
+when: Either([]const u8, *const fn (std.mem.Allocator) bool) = .{ .L = "" },
 format: ?[]const u8 = null, // use tmux style format strings, e.g. #[fg=blue,bg=black,bold,underscore]
 enabled: bool = true,
+timeout_ms: u64 = 500,
 
 pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
     if (!self.enabled) {
@@ -33,23 +34,15 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
 
 /// Evaluate the 'when' condition and return any output
 pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
+    // std.log.debug("Evaluating command: {s}", .{self.name});
     switch (self.cmd) {
         .L => |cmd_str| {
-            var p = std.process.Child.init(&[_][]const u8{ "sh", "-c", cmd_str }, alloc);
-            p.stdin_behavior = .Ignore;
-            p.stdout_behavior = .Pipe;
-            p.stderr_behavior = .Pipe;
-
-            _ = try p.spawn();
-            defer _ = p.kill() catch |err| {
-                std.log.err("Failed to kill process: {}\n", .{err});
-            };
-
-            if (p.stdout) |stdout_pipe| {
-                return try stdout_pipe.readToEndAlloc(alloc, 4096); // max 4KB output
-            } else {
-                return "";
-            }
+            const res = try std.process.Child.run(.{
+                .argv = &[_][]const u8{ "sh", "-c", cmd_str },
+                .allocator = alloc,
+            });
+            defer alloc.free(res.stderr);
+            return res.stdout;
         },
         .R => |cmd_fn| {
             return cmd_fn(alloc);

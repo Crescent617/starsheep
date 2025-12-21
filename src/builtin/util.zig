@@ -4,7 +4,7 @@ pub const PathInfo = struct {
     stat: std.fs.File.Stat,
     path: []const u8,
 
-    fn deinit(self: *const PathInfo, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const PathInfo, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
     }
 };
@@ -52,6 +52,15 @@ fn statFile(allocator: std.mem.Allocator, base: []const u8, child: []const u8) ?
         return null;
     };
     return stat;
+}
+
+pub fn runSubprocess(allocator: std.mem.Allocator, cmd: []const []const u8) ![]const u8 {
+    const res = try std.process.Child.run(.{
+        .argv = cmd,
+        .allocator = allocator,
+    });
+    defer allocator.free(res.stderr);
+    return res.stdout;
 }
 
 test "existsFileUpwards finds file in parent directories" {

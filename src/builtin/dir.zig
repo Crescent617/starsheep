@@ -1,6 +1,13 @@
 const std = @import("std");
+const util = @import("util.zig");
 
 pub fn curDir(alloc: std.mem.Allocator) []const u8 {
+    if (util.statFileUpwards(alloc, ".", ".git")) |git_dir| {
+        defer git_dir.deinit(alloc);
+        var dir_path = std.fs.path.dirname(git_dir.path) orelse "";
+        dir_path = std.fs.path.basename(dir_path);
+        return alloc.dupe(u8, dir_path) catch "|error|";
+    }
     return getCurrentDir(alloc) catch "|error|";
 }
 

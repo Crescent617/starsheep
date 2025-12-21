@@ -5,11 +5,13 @@ pub const Conf = @import("conf.zig").AppConf;
 const builtins = @import("builtin/mod.zig").builtins;
 const chameleon = @import("chameleon");
 const fmt = @import("fmt.zig");
+const toml = @import("toml");
 
 pub const App = struct {
     cmds: std.ArrayList(Cmd),
     alloc: std.mem.Allocator,
     formatter: chameleon.RuntimeChameleon,
+    parsed_conf: ?toml.Parsed(Conf) = null,
 
     const Self = @This();
 
@@ -30,6 +32,15 @@ pub const App = struct {
     pub fn deinit(self: *App) void {
         self.cmds.deinit(self.alloc);
         self.formatter.deinit();
+        if (self.parsed_conf) |conf| {
+            conf.deinit();
+        }
+    }
+
+    pub fn applyConfigFile(self: *App, path: []const u8) !void {
+        const conf = try Conf.fromTomlFile(self.alloc, path);
+        self.parsed_conf = conf;
+        try self.applyConfig(&conf.value);
     }
 
     pub fn applyConfig(self: *App, cfg: *const Conf) !void {
@@ -41,36 +52,40 @@ pub const App = struct {
             _ = try cmd_map.put(self.cmds.items[i].name, &self.cmds.items[i]);
         }
 
-        var alloc = self.alloc;
-
         for (cfg.cmds) |cmd_conf| {
             if (cmd_map.get(cmd_conf.name)) |existing_cmd| {
                 existing_cmd.enabled = cmd_conf.enabled orelse existing_cmd.enabled;
                 existing_cmd.format = cmd_conf.format orelse existing_cmd.format;
             } else {
                 const cmd = Cmd{
-                    .name = try alloc.dupe(u8, cmd_conf.name),
-                    .cmd = .{ .L = try alloc.dupe(u8, cmd_conf.cmd) },
-                    .when = .{ .L = if (cmd_conf.when) |w| try alloc.dupe(u8, w) else "" },
-                    .format = if (cmd_conf.format) |f| try alloc.dupe(u8, f) else null,
+                    .name = cmd_conf.name,
+                    .cmd = .{ .L = cmd_conf.cmd },
+                    .when = .{ .L = cmd_conf.when orelse "" },
+                    .format = cmd_conf.format,
                     .enabled = cmd_conf.enabled orelse true,
                 };
-                try self.cmds.append(alloc, cmd);
+                try self.cmds.append(self.alloc, cmd);
             }
         }
     }
 
     pub fn run(self: *App, writer: *std.io.Writer) !void {
-        for (self.cmds.items, 0..) |cmd, i| {
+        var is_first = true;
+
+        for (self.cmds.items) |cmd| {
             if (!try cmd.needsEval(self.alloc)) continue;
 
             const res = try cmd.eval(self.alloc);
+            defer self.alloc.free(res);
 
-            try fmt.format(self.alloc, cmd.format, res, &self.formatter, writer);
+            if (res.len == 0) continue;
 
-            if (i != self.cmds.items.len - 1) {
+            if (!is_first) {
                 _ = try writer.writeByte(' ');
+            } else {
+                is_first = false;
             }
+            try fmt.format(self.alloc, cmd.format, res, &self.formatter, writer);
         }
     }
 };

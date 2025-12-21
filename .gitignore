@@ -19,3 +19,4 @@ docgen_tmp/
 
 .direnv
 .env
+.venv
