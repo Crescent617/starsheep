@@ -20,3 +20,5 @@ docgen_tmp/
 .direnv
 .env
 .venv
+# nix-build
+result

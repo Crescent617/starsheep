@@ -81,8 +81,6 @@ pub const GitStatus = struct {
 
         try buf.ensureTotalCapacity(alloc, 6);
 
-        try buf.appendSlice(alloc, "[");
-
         if (self.untracked > 0) {
             try buf.appendSlice(alloc, "?");
         }
@@ -106,8 +104,6 @@ pub const GitStatus = struct {
                 try buf.appendSlice(alloc, "󰁆");
             }
         }
-
-        try buf.appendSlice(alloc, "]");
         return try buf.toOwnedSlice(alloc);
     }
 };

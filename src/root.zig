@@ -106,7 +106,7 @@ pub const App = struct {
             if (cmd_map.get(cmd_conf.name)) |existing_cmd| {
                 existing_cmd.enabled = cmd_conf.enabled orelse existing_cmd.enabled;
                 existing_cmd.format = cmd_conf.format orelse existing_cmd.format;
-            } else {
+            } else if (cmd_conf.enabled orelse true) {
                 const cmd = Cmd{
                     .name = cmd_conf.name,
                     .cmd = .{ .L = cmd_conf.cmd },

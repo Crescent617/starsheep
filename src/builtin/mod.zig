@@ -23,16 +23,16 @@ pub const builtins = [_]Cmd{ .{
 }, .{
     .name = "git_status",
     .cmd = .{ .R = git.gitStatus },
-    .format = "#[fg=red,bold]$output",
+    .format = "#[fg=red,bold][$output]",
 }, .{
     .name = "python",
     .cmd = .{ .R = pyVer },
     .when = .{ .L = "" },
-    .format = "#[fg=yellow,bold]🐍$output",
+    .format = "#[fg=yellow,bold] $output",
 }, .{
     .name = "zig",
     .cmd = .{ .R = zigVer },
-    .format = "#[fg=green,bold]🦎$output",
+    .format = "#[fg=yellow,bold] $output",
 }, .{
     .name = "nix-shell",
     .cmd = .{ .R = nixShell },
@@ -55,9 +55,12 @@ pub const builtins = [_]Cmd{ .{
     .format = "#[fg=blue,bold] $output",
 } };
 
-fn zigVer(_: std.mem.Allocator) []const u8 {
+fn zigVer(alloc: std.mem.Allocator) []const u8 {
+    if (!util.existsFileUpwards(alloc, ".", "build.zig")) {
+        return "";
+    }
     const builtin = @import("builtin");
-    return builtin.zig_version_string;
+    return alloc.dupe(u8, builtin.zig_version_string) catch return "";
 }
 
 fn pyVer(alloc: std.mem.Allocator) []const u8 {
