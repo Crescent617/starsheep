@@ -1,44 +1,47 @@
 const std = @import("std");
-const Cmd = @import("Cmd.zig");
 
-pub const builtins = [_]Cmd{
-    Cmd{
-        .name = "git_status",
-        .cmd = "",
-        .cmd_fn = null,
-        .when_fn = null,
-        .format = "Listing files in the current directory:",
-    },
+pub const PathInfo = struct {
+    stat: std.fs.File.Stat,
+    path: []const u8,
+
+    pub fn deinit(self: *const PathInfo, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+    }
 };
 
-pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?std.fs.File.Stat {
+pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?PathInfo {
     // 先规范化为绝对路径，避免 ".." 等造成判断异常
-    var cur = std.fs.cwd().realpathAlloc(allocator, start_dir) catch return null;
-    defer allocator.free(cur);
+    const p = std.fs.cwd().realpathAlloc(allocator, start_dir) catch return null;
+    defer allocator.free(p);
+
+    var cur: []const u8 = p;
 
     while (true) {
         if (statFile(allocator, cur, filename)) |res| {
-            return res;
+            return PathInfo{
+                .stat = res,
+                .path = std.fs.path.join(allocator, &.{ cur, filename }) catch return null,
+            };
         }
 
-        const parent_opt = std.fs.path.dirname(cur);
-        if (parent_opt == null) break;
-
-        const parent = parent_opt.?;
+        const parent = std.fs.path.dirname(cur) orelse break;
 
         // 根目录时 dirname 往往返回自身，避免死循环
         if (std.mem.eql(u8, parent, cur)) break;
 
-        const next = allocator.dupe(u8, parent) catch return null;
-        allocator.free(cur);
-        cur = next;
+        cur = parent;
     }
 
     return null;
 }
 
 pub fn existsFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) bool {
-    return statFileUpwards(allocator, start_dir, filename) != null;
+    const res = statFileUpwards(allocator, start_dir, filename);
+    if (res) |p| {
+        p.deinit(allocator);
+        return true;
+    }
+    return false;
 }
 
 fn statFile(allocator: std.mem.Allocator, base: []const u8, child: []const u8) ?std.fs.File.Stat {
@@ -49,6 +52,15 @@ fn statFile(allocator: std.mem.Allocator, base: []const u8, child: []const u8) ?
         return null;
     };
     return stat;
+}
+
+pub fn runSubprocess(allocator: std.mem.Allocator, cmd: []const []const u8) ![]const u8 {
+    const res = try std.process.Child.run(.{
+        .argv = cmd,
+        .allocator = allocator,
+    });
+    defer allocator.free(res.stderr);
+    return res.stdout;
 }
 
 test "existsFileUpwards finds file in parent directories" {

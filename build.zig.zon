@@ -40,6 +40,10 @@
             .url = "git+https://github.com/sam701/zig-toml#44318b82b961cb3c09a23924c2de80b9192213bd",
             .hash = "toml-0.3.0-bV14BeiEAQBmkb-ywYhHxpBdt52ztkRmf-EVyEFbrTxt",
         },
+        .yazap = .{
+            .url = "git+https://github.com/prajwalch/yazap#a920616e3a6676362735a2f5ae195ec320f058fb",
+            .hash = "yazap-0.6.3-Z1t-Emb0AQD_SkYf4dz_nEmAh9oRKiu6nexSJMGK3wcf",
+        },
     },
     .paths = .{
         "build.zig",

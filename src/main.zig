@@ -1,57 +1,74 @@
 const std = @import("std");
+const yazap = @import("yazap");
+const Arg = yazap.Arg;
 const starsheep = @import("starsheep");
-const chameleon = @import("chameleon");
+const scripts = @import("scripts/mod.zig");
 
 pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try starsheep.bufferedPrint();
+    var gpa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer gpa.deinit();
 
-    // Chameleon example - colorful terminal output
-    std.debug.print("\n=== Chameleon Examples ===\n", .{});
+    const allocator = gpa.allocator();
 
-    // Example 1: Basic colors using comptime
-    comptime var c = chameleon.initComptime();
-    std.debug.print("{s} {s} {s}\n", .{
-        c.red().fmt("Red"),
-        c.blue().fmt("Blue"),
-        c.green().fmt("Green"),
-    });
+    var app = yazap.App.init(allocator, "starsheep", "A customizable shell prompt generator");
+    defer app.deinit();
 
-    // Example 2: Background colors
-    std.debug.print("{s} {s}\n", .{
-        c.bgYellow().fmt("Yellow background"),
-        c.bgMagenta().fmt("Magenta background"),
-    });
+    var r = app.rootCommand();
+    r.setProperty(.help_on_empty_args);
 
-    // Example 3: Styles
-    std.debug.print("{s} {s} {s}\n", .{
-        c.bold().fmt("Bold"),
-        c.italic().fmt("Italic"),
-        c.underline().fmt("Underline"),
-    });
+    var prompt = app.createCommand("prompt", "Generate and output the shell prompt");
+    try prompt.addArg(Arg.singleValueOption("last-exit-code", null, "The exit code of the last executed command"));
+    try prompt.addArg(Arg.singleValueOption("last-duration-ms", null, "The duration in milliseconds of the last executed command"));
+    try prompt.addArg(Arg.singleValueOption("jobs", null, "The number of background jobs currently running"));
+    try r.addSubcommand(prompt);
 
-    // Example 4: Combining styles
-    std.debug.print("{s} {s}\n", .{
-        c.bold().red().fmt("Bold red"),
-        c.italic().blue().bgCyan().fmt("Italic blue on cyan"),
-    });
+    var init = app.createCommand("init", "Output shell initialization script");
+    try init.addArg(Arg.singleValueOptionWithValidValues(
+        "shell",
+        null,
+        "The shell type to generate the initialization script for",
+        &[_][]const u8{"zsh"},
+    ));
+    try r.addSubcommand(init);
 
-    // Example 5: More complex combinations
-    std.debug.print("{s}\n", .{c.bold().underline().green().fmt("Bold underlined green header")});
+    const matches = try app.parseProcess();
 
-    // Example 6: Print methods
-    try c.bold().magenta().printOut("Bold magenta using printOut\n", .{});
+    if (matches.subcommandMatches("prompt")) |am| {
+        try promptMain(allocator, .{
+            .last_exit_code = am.getSingleValue("last-exit-code"),
+            .last_duration_ms = am.getSingleValue("last-duration-ms"),
+            .jobs = am.getSingleValue("jobs"),
+        });
+    } else if (matches.subcommandMatches("init")) |am| {
+        _ = am.getSingleValue("shell") orelse return error.MissingArgument;
+        try std.fs.File.stdout().writeAll(scripts.init_zsh_script);
+    } else {
+        try app.displayHelp();
+    }
+}
 
-    // Example 7: Runtime API with NO_COLOR support
-    var runtime_chameleon = chameleon.initRuntime(.{
-        .allocator = std.heap.page_allocator,
-        .detect_no_color = true,
-    });
-    defer runtime_chameleon.deinit();
+fn promptMain(alloc: std.mem.Allocator, st: starsheep.ShellState) !void {
+    var app = try starsheep.App.init(alloc);
+    defer app.deinit();
 
-    // Runtime styles work the same way as comptime but need format args
-    const runtime_text = try runtime_chameleon.bold().green().fmt("{s}", .{"Runtime style (respects NO_COLOR env var)"});
-    defer std.heap.page_allocator.free(runtime_text);
-    std.debug.print("{s}\n", .{runtime_text});
+    app.shell_state = st;
+
+    const conf_path = try getConfig(alloc);
+    defer alloc.free(conf_path);
+
+    app.applyConfigFile(conf_path) catch |err| {
+        std.log.debug("Failed to apply config file '{s}': {}\n", .{ conf_path, err });
+    };
+
+    var buf: [1024]u8 = undefined;
+    var writer = std.fs.File.stdout().writer(&buf);
+    defer writer.interface.flush() catch {};
+
+    try app.run(&writer.interface);
+}
+
+fn getConfig(alloc: std.mem.Allocator) ![]const u8 {
+    const home_dir = try std.process.getEnvVarOwned(alloc, "HOME");
+    defer alloc.free(home_dir);
+    return std.fs.path.join(alloc, &.{ home_dir, ".config", "starsheep.toml" });
 }
