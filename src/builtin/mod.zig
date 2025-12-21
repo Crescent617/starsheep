@@ -7,11 +7,11 @@ const util = @import("util.zig");
 pub const builtins = [_]Cmd{ .{
     .name = "user",
     .cmd = .{ .R = username },
-    .format = "#[fg=yellow,bold]$output",
+    .format = "#[fg=yellow,bold]$output @",
 }, .{
     .name = "host",
     .cmd = .{ .R = hostname },
-    .format = "#[fg=green,bold]$output",
+    .format = "#[fg=green,bold]󰢹 $output",
 }, .{
     .name = "cwd",
     .cmd = .{ .R = dir.curDir },
@@ -140,10 +140,8 @@ fn hostname(alloc: std.mem.Allocator) []const u8 {
     if (!std.process.hasEnvVarConstant("SSH_CONNECTION")) {
         return "";
     }
-
-    var host = std.process.getEnvVarOwned(alloc, "HOSTNAME") catch "";
-    if (host.len == 0) {
-        host = std.process.getEnvVarOwned(alloc, "HOST") catch "";
-    }
-    return host;
+    var buf: [std.os.linux.HOST_NAME_MAX]u8 = undefined;
+    // std.posix.gethostname 在各平台通用
+    const name = std.posix.gethostname(&buf) catch "";
+    return alloc.dupe(u8, name) catch "";
 }

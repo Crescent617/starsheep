@@ -162,4 +162,7 @@ pub fn build(b: *std.Build) void {
 
     mod.link_libc = true;
     mod.linkSystemLibrary("libgit2", .{});
+
+    const yazap = b.dependency("yazap", .{});
+    exe.root_module.addImport("yazap", yazap.module("yazap"));
 }
