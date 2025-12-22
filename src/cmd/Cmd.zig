@@ -1,9 +1,10 @@
 const Cmd = @This();
 const Self = Cmd;
-const Either = @import("util/types.zig").Either;
+const Either = @import("../util/types.zig").Either;
 
 const std = @import("std");
-const fmt = @import("fmt.zig");
+const fmt = @import("../fmt.zig");
+const env = @import("../env.zig");
 
 name: []const u8,
 cmd: Either([]const u8, *const fn (std.mem.Allocator) []const u8),
@@ -17,12 +18,13 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
         return false;
     }
 
-    const start_time = std.time.milliTimestamp();
-    defer {
+    const start_time = if (env.DEBUG_MODE) std.time.milliTimestamp() else 0;
+    defer if (env.DEBUG_MODE) {
         const end_time = std.time.milliTimestamp();
         const duration = end_time - start_time;
-        std.log.debug("needsEval for command '{s}' executed in {}ms", .{ self.name, duration });
-    }
+        if (duration > 1)
+            std.log.info("needsEval\t'{s}'\ttook {}ms", .{ self.name, duration });
+    };
 
     switch (self.when) {
         .L => |s| {
@@ -42,12 +44,13 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
 
 /// Evaluate the 'when' condition and return any output
 pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
-    const start_time = std.time.milliTimestamp();
-    defer {
+    const start_time = if (env.DEBUG_MODE) std.time.milliTimestamp() else 0;
+    defer if (env.DEBUG_MODE) {
         const end_time = std.time.milliTimestamp();
         const duration = end_time - start_time;
-        std.log.debug("Command '{s}' executed in {}ms", .{ self.name, duration });
-    }
+        if (duration > 1)
+            std.log.info("eval\t'{s}'\ttook {}ms", .{ self.name, duration });
+    };
 
     switch (self.cmd) {
         .L => |cmd_str| {

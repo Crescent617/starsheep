@@ -1,16 +1,14 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
-const Cmd = @import("Cmd.zig");
+const Cmd = @import("cmd/Cmd.zig");
 pub const Conf = @import("conf.zig").AppConf;
-const builtins = @import("builtin/mod.zig").builtins;
+const builtins = @import("cmd/mod.zig").builtins;
 const chameleon = @import("chameleon");
 const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
 
-// Import cleanup functions
-const cleanupVersionCache = @import("builtin/mod.zig").cleanupVersionCache;
-const git = @import("builtin/git.zig");
+const git = @import("cmd/git.zig");
 
 pub const ShellState = struct {
     shell: []const u8 = "zsh",
@@ -72,6 +70,7 @@ pub const App = struct {
     const Self = @This();
 
     pub fn init(alloc: std.mem.Allocator) !App {
+        @import("env.zig").init();
         var arr = std.ArrayList(Cmd).empty;
         try arr.appendSlice(alloc, &builtins);
 
@@ -86,8 +85,6 @@ pub const App = struct {
     }
 
     pub fn deinit(self: *App) void {
-        // Cleanup caches
-        cleanupVersionCache(self.alloc);
         git.deinit();
 
         self.cmds.deinit(self.alloc);
