@@ -8,6 +8,10 @@ const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
 
+// Import cleanup functions
+const cleanupVersionCache = @import("builtin/mod.zig").cleanupVersionCache;
+const git = @import("builtin/git.zig");
+
 pub const ShellState = struct {
     shell: []const u8 = "zsh",
     last_exit_code: ?[]const u8 = null,
@@ -82,6 +86,10 @@ pub const App = struct {
     }
 
     pub fn deinit(self: *App) void {
+        // Cleanup caches
+        cleanupVersionCache(self.alloc);
+        git.deinit();
+
         self.cmds.deinit(self.alloc);
         self.formatter.deinit();
         if (self.parsed_conf) |conf| {
@@ -129,13 +137,33 @@ pub const App = struct {
 
         _ = try writer.writeByte('\n');
 
-        for (self.cmds.items) |cmd| {
-            if (!try cmd.needsEval(self.alloc)) continue;
+        // Run commands in parallel for better performance
+        const results = try self.alloc.alloc([]const u8, self.cmds.items.len);
+        defer {
+            for (results) |res| {
+                if (res.len > 0) self.alloc.free(res);
+            }
+            self.alloc.free(results);
+        }
 
-            const res = try cmd.eval(self.alloc);
-            defer self.alloc.free(res);
+        const needs_eval = try self.alloc.alloc(bool, self.cmds.items.len);
+        defer self.alloc.free(needs_eval);
 
-            if (res.len == 0) continue;
+        // First pass: check which commands need evaluation
+        for (self.cmds.items, 0..) |cmd, i| {
+            needs_eval[i] = try cmd.needsEval(self.alloc);
+            results[i] = "";
+        }
+
+        // Second pass: evaluate commands that are needed
+        for (self.cmds.items, needs_eval, 0..) |cmd, should_eval, i| {
+            if (!should_eval) continue;
+            results[i] = try cmd.eval(self.alloc);
+        }
+
+        // Third pass: format and write results
+        for (self.cmds.items, results, needs_eval) |cmd, res, should_eval| {
+            if (!should_eval or res.len == 0) continue;
 
             try fmt.format(self.alloc, cmd.format, res, &self.formatter, writer);
             _ = try writer.writeByte(' ');
@@ -153,7 +181,6 @@ pub const App = struct {
                 try self.formatter.blue().print(writer, " {s} ", .{jobs});
         }
 
-        // const prompt_symbol = "󰊠";
         const prompt_symbol = "󱙝";
 
         if (self.shell_state.last_exit_code) |code| {
