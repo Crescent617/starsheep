@@ -129,58 +129,63 @@ pub const App = struct {
         }
     }
 
-    pub fn run(self: *App, out: *std.io.Writer) !void {
-        var buf = std.io.Writer.Allocating.init(self.alloc);
-        defer buf.deinit();
+    /// Execute commands and collect their results
+    fn executeCommands(self: *App, results: [][]const u8) !void {
+        var threads: std.ArrayList(std.Thread) = .empty;
+        defer threads.deinit(self.alloc);
 
-        var writer = &buf.writer;
-
-        _ = try writer.writeByte('\n');
-
-        // Run commands in parallel for better performance
-        const results = try self.alloc.alloc([]const u8, self.cmds.items.len);
-        defer {
-            for (results) |res| {
-                if (res.len > 0) self.alloc.free(res);
-            }
-            self.alloc.free(results);
-        }
-
-        const needs_eval = try self.alloc.alloc(bool, self.cmds.items.len);
-        defer self.alloc.free(needs_eval);
-
-        // First pass: check which commands need evaluation
-        for (self.cmds.items, 0..) |cmd, i| {
-            needs_eval[i] = try cmd.needsEval(self.alloc);
-            results[i] = "";
-        }
+        try threads.ensureTotalCapacity(self.alloc, self.cmds.items.len);
 
         // Second pass: evaluate commands that are needed
-        for (self.cmds.items, needs_eval, 0..) |cmd, should_eval, i| {
-            if (!should_eval) continue;
-            results[i] = try cmd.eval(self.alloc);
+        for (self.cmds.items, 0..) |cmd, i| {
+            if (!try cmd.needsEval(self.alloc)) continue;
+
+            const t = try std.Thread.spawn(.{}, struct {
+                fn f(c: *const Cmd, result_ptr: *[]const u8) void {
+                    const res = c.eval(std.heap.page_allocator) catch {
+                        result_ptr.* = "";
+                        return;
+                    };
+                    result_ptr.* = res;
+                }
+            }.f, .{ &self.cmds.items[i], &results[i] });
+
+            try threads.append(self.alloc, t);
         }
 
-        // Third pass: format and write results
-        for (self.cmds.items, results, needs_eval) |cmd, res, should_eval| {
-            if (!should_eval or res.len == 0) continue;
+        for (threads.items) |t| {
+            t.join();
+        }
+    }
 
+    /// Format and write command results to the writer
+    fn writeCommandResults(self: *App, writer: anytype, results: []const []const u8) !void {
+        for (self.cmds.items, results) |cmd, res| {
+            if (res.len == 0) continue;
             try fmt.format(self.alloc, cmd.format, res, &self.formatter, writer);
             _ = try writer.writeByte(' ');
         }
+    }
 
+    /// Write timing information if available
+    fn writeTiming(self: *App, writer: *std.Io.Writer) !void {
         const lastDur = try self.shell_state.lastDurationMs(self.alloc);
         if (lastDur.len != 0) {
             try self.formatter.gray().print(writer, "⏱ {s}", .{lastDur});
         }
+    }
 
-        _ = try writer.writeByte('\n');
-
+    /// Write job count if any background jobs are running
+    fn writeJobCount(self: *App, writer: *std.Io.Writer) !void {
         if (self.shell_state.jobs) |jobs| {
-            if (!std.mem.eql(u8, jobs, "0"))
+            if (!std.mem.eql(u8, jobs, "0")) {
                 try self.formatter.blue().print(writer, " {s} ", .{jobs});
+            }
         }
+    }
 
+    /// Write the prompt symbol with appropriate color based on exit code
+    fn writePromptSymbol(self: *App, writer: *std.Io.Writer) !void {
         const prompt_symbol = "󱙝";
 
         if (self.shell_state.last_exit_code) |code| {
@@ -194,18 +199,48 @@ pub const App = struct {
         } else {
             try self.formatter.green().print(writer, "{s}", .{prompt_symbol});
         }
+    }
 
-        const buf_slice = try buf.toOwnedSlice();
-        defer self.alloc.free(buf_slice);
-
-        // post process and write to out
+    /// Write final prompt output with shell-specific processing
+    fn writeFinalOutput(self: *App, out: *std.io.Writer, content: []const u8) !void {
         if (std.mem.eql(u8, self.shell_state.shell, "zsh")) {
-            const final_str = try shell.wrapAnsiForZsh(self.alloc, buf_slice);
+            const final_str = try shell.wrapAnsiForZsh(self.alloc, content);
             defer self.alloc.free(final_str);
             try out.writeAll(final_str);
         } else {
-            try out.writeAll(buf_slice);
+            try out.writeAll(content);
         }
+    }
+
+    pub fn run(self: *App, out: *std.io.Writer) !void {
+        var buf = std.io.Writer.Allocating.init(self.alloc);
+        defer buf.deinit();
+
+        var writer = &buf.writer;
+        _ = try writer.writeByte('\n');
+
+        // Run commands in parallel for better performance
+        const results = try self.alloc.alloc([]const u8, self.cmds.items.len);
+        defer {
+            for (results) |res| {
+                if (res.len > 0) self.alloc.free(res);
+            }
+            self.alloc.free(results);
+        }
+
+        // Execute commands and collect results
+        try self.executeCommands(results);
+        try self.writeCommandResults(writer, results);
+
+        // Write timing and status information
+        try self.writeTiming(writer);
+        _ = try writer.writeByte('\n');
+        try self.writeJobCount(writer);
+        try self.writePromptSymbol(writer);
+
+        // Get final buffer and write with shell-specific processing
+        const buf_slice = buf.written();
+        try self.writeFinalOutput(out, buf_slice);
     }
 };
 

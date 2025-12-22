@@ -2,12 +2,31 @@ const std = @import("std");
 const util = @import("util.zig");
 
 pub fn curDir(alloc: std.mem.Allocator) []const u8 {
+    // Get current working directory
+    const cwd = std.fs.cwd().realpathAlloc(alloc, ".") catch return "|error|";
+    defer alloc.free(cwd);
+
+    // Find .git directory upwards
     if (util.statFileUpwards(alloc, ".", ".git")) |git_dir| {
         defer git_dir.deinit(alloc);
-        var dir_path = std.fs.path.dirname(git_dir.path) orelse "";
-        dir_path = std.fs.path.basename(dir_path);
-        return alloc.dupe(u8, dir_path) catch "|error|";
+
+        // Get the git repository root (parent of .git)
+        const git_root = std.fs.path.dirname(git_dir.path) orelse "";
+
+        // If current directory is the git root, return basename
+        if (std.mem.eql(u8, cwd, git_root)) {
+            return alloc.dupe(u8, std.fs.path.basename(cwd)) catch "|error|";
+        }
+
+        // If current directory is inside git repository, preserve relative path
+        if (std.mem.startsWith(u8, cwd, git_root)) {
+            // Calculate the relative path from git root
+            const relative_path = cwd[git_root.len..];
+            return std.fs.path.join(alloc, &.{ std.fs.path.basename(git_root), relative_path }) catch "|error|";
+        }
     }
+
+    // Fallback to regular current directory handling
     return getCurrentDir(alloc) catch "|error|";
 }
 
