@@ -16,6 +16,14 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
     if (!self.enabled) {
         return false;
     }
+
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        const duration = end_time - start_time;
+        std.log.debug("needsEval for command '{s}' executed in {}ms", .{ self.name, duration });
+    }
+
     switch (self.when) {
         .L => |s| {
             if (s.len == 0) {
@@ -34,7 +42,13 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
 
 /// Evaluate the 'when' condition and return any output
 pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
-    // std.log.debug("Evaluating command: {s}", .{self.name});
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        const duration = end_time - start_time;
+        std.log.debug("Command '{s}' executed in {}ms", .{ self.name, duration });
+    }
+
     switch (self.cmd) {
         .L => |cmd_str| {
             const res = try std.process.Child.run(.{

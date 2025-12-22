@@ -33,8 +33,7 @@ _starsheep_get_prompt() {
     starsheep prompt \
         --last-exit-code "$STARSHEEP_LAST_STATUS" \
         --last-duration-ms "$STARSHEEP_LAST_DURATION" \
-        --jobs "$STARSHEEP_JOBS" \
-        2>/dev/null
+        --jobs "$STARSHEEP_JOBS"
 }
 
 # 注册钩子

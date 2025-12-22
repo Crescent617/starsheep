@@ -1,0 +1,133 @@
+# ⭐ Starsheep
+
+<img src="assets/logo.png" alt="Starsheep Logo" width="200" style="border-radius: 20px;"/>
+
+A blazingly fast, customizable shell prompt generator written in Zig. Starsheep creates beautiful, informative prompts for zsh shells with built-in modules for git status, language versions, and system information.
+
+## ✨ Features
+
+- **🚀 Blazing Fast**: Written in Zig for maximum performance
+- **🔧 Highly Customizable**: TOML-based configuration with tmux-style formatting
+- **📦 Rich Built-in Modules**: Git status, language versions (Python, Node, Zig, Go, Rust), environment info
+- **🎯 Smart Display**: Conditional commands that only show when relevant
+- **🌈 Beautiful Colors**: Full terminal color support with chameleon library
+- **🔌 Shell Integration**: Native zsh support with command duration tracking
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Zig 0.15.2 or higher
+- zsh shell
+- Git (for git module features)
+
+### Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/starsheep.git
+cd starsheep
+```
+
+2. Build the project:
+```bash
+zig build
+```
+
+3. Install to your system:
+```bash
+zig build install
+```
+
+4. Add to your `.zshrc`:
+```bash
+# Add starsheep to your PATH
+export PATH="$PATH:/path/to/starsheep/zig-out/bin"
+
+# Initialize starsheep
+eval "$(starsheep init --shell zsh)"
+```
+
+## 📖 Usage
+
+### Basic Usage
+
+```bash
+# Generate a prompt
+starsheep prompt
+
+# Initialize shell integration
+starsheep init
+```
+
+### Configuration
+
+Starsheep uses a TOML configuration file located at `~/.config/starsheep.toml`. Here's an example:
+
+```toml
+[[cmds]]
+name = "time"
+cmd = "date +'%H:%M:%S'"
+format = "#[fg=green]$output"
+```
+
+### Built-in Commands
+
+Starsheep includes many built-in commands:
+
+- **System**: `user`, `host`, `cwd`, `duration`
+- **Git**: `git_branch`, `git_status`
+- **Languages**: `python`, `node`, `zig`, `go`, `rust`
+- **Environment**: `nix`, `http_proxy`
+
+## 🛠️ Development
+
+### Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/starsheep.git
+cd starsheep
+
+# Build the project
+zig build
+
+# Run tests
+zig build test
+
+# Run the application
+zig build run
+```
+
+
+### Architecture
+
+Starsheep is built with a modular architecture:
+
+- **Command System**: Commands can be shell strings or Zig functions
+- **Conditional Execution**: Commands can have `when` conditions
+- **Variable Substitution**: `$output` in format strings gets replaced with command output
+- **Tmux-style Formatting**: Uses `#[fg=red,bg=black,bold]` syntax
+
+## 🧪 Testing
+
+Run the test suite:
+
+```bash
+zig build test
+```
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 🙏 Acknowledgments
+
+- Built with [Zig](https://ziglang.org/)
+- Terminal colors powered by [chameleon](https://github.com/tr1ckydev/chameleon)
+- TOML parsing with [zig-toml](https://github.com/sam701/zig-toml)
+- CLI parsing with [yazap](https://github.com/prajwalch/yazap)
