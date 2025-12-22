@@ -72,6 +72,25 @@ pub fn gitStatus(allocator: std.mem.Allocator) []const u8 {
     };
 }
 
+pub fn gitState(allocotor: std.mem.Allocator) []const u8 {
+    ensureGit2Inited.call();
+    if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
+
+    const repo = git_repo_cache.?.repo;
+
+    const state: RepoState = @enumFromInt(git.git_repository_state(repo));
+    const res = switch (state) {
+        .MERGE => " MERGING",
+        .REBASE, .REBASE_INTERACTIVE, .REBASE_MERGE => " REBASE",
+        .CHERRYPICK, .CHERRYPICK_SEQUENCE => " CHERRY-PICK",
+        .REVERT, .REVERT_SEQUENCE => " REVERT",
+        .BISECT => "󰈞 BISECT",
+        .APPLY_MAILBOX, .APPLY_MAILBOX_OR_REBASE => " AM",
+        else => "",
+    };
+    return allocotor.dupe(u8, res) catch "";
+}
+
 pub fn gitBranch(allocator: std.mem.Allocator) []const u8 {
     ensureGit2Inited.call();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
@@ -103,6 +122,21 @@ pub fn gitBranch(allocator: std.mem.Allocator) []const u8 {
     return allocator.dupe(u8, std.mem.span(name_c)) catch "";
 }
 
+const RepoState = enum(u32) {
+    NONE = git.GIT_REPOSITORY_STATE_NONE,
+    MERGE = git.GIT_REPOSITORY_STATE_MERGE,
+    REVERT = git.GIT_REPOSITORY_STATE_REVERT,
+    REVERT_SEQUENCE = git.GIT_REPOSITORY_STATE_REVERT_SEQUENCE,
+    CHERRYPICK = git.GIT_REPOSITORY_STATE_CHERRYPICK,
+    CHERRYPICK_SEQUENCE = git.GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE,
+    BISECT = git.GIT_REPOSITORY_STATE_BISECT,
+    REBASE = git.GIT_REPOSITORY_STATE_REBASE,
+    REBASE_INTERACTIVE = git.GIT_REPOSITORY_STATE_REBASE_INTERACTIVE,
+    REBASE_MERGE = git.GIT_REPOSITORY_STATE_REBASE_MERGE,
+    APPLY_MAILBOX = git.GIT_REPOSITORY_STATE_APPLY_MAILBOX,
+    APPLY_MAILBOX_OR_REBASE = git.GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE,
+};
+
 pub const GitStatus = struct {
     staged: usize = 0,
     unstaged: usize = 0,
@@ -111,61 +145,12 @@ pub const GitStatus = struct {
     ahead: usize = 0,
     behind: usize = 0,
 
-    // Special repository states
-    merging: bool = false,
-    rebasing: bool = false,
-    cherrypicking: bool = false,
-    reverting: bool = false,
-    bisecting: bool = false,
-    reverting_sequence: bool = false,
-    cherrypicking_sequence: bool = false,
-    rebase_interactive: bool = false,
-    rebase_merge: bool = false,
-    applying_mailbox: bool = false,
-    applying_mailbox_or_rebase: bool = false,
-
     fn deinit(_: *const GitStatus, _: std.mem.Allocator) void {
         // noop
     }
 
     fn statusStr(self: *const GitStatus, alloc: std.mem.Allocator) ![]const u8 {
-        // Check if we have any special states first
-        if (self.merging) {
-            return try alloc.dupe(u8, "⚡MERGE");
-        }
-        if (self.rebasing) {
-            return try alloc.dupe(u8, "⚡REBASE");
-        }
-        if (self.cherrypicking) {
-            return try alloc.dupe(u8, "⚡CHERRY-PICK");
-        }
-        if (self.cherrypicking_sequence) {
-            return try alloc.dupe(u8, "⚡CHERRY-PICK SEQ");
-        }
-        if (self.reverting) {
-            return try alloc.dupe(u8, "⚡REVERT");
-        }
-        if (self.reverting_sequence) {
-            return try alloc.dupe(u8, "⚡REVERT SEQ");
-        }
-        if (self.bisecting) {
-            return try alloc.dupe(u8, "⚡BISECT");
-        }
-        if (self.rebase_interactive) {
-            return try alloc.dupe(u8, "⚡REBASE-I");
-        }
-        if (self.rebase_merge) {
-            return try alloc.dupe(u8, "⚡REBASE-M");
-        }
-        if (self.applying_mailbox) {
-            return try alloc.dupe(u8, "⚡AM");
-        }
-        if (self.applying_mailbox_or_rebase) {
-            return try alloc.dupe(u8, "⚡AM/REBASE");
-        }
-
-        // If no special states, show regular file status
-        const is_empty = std.meta.eql(self.*, GitStatus{ .staged = 0, .unstaged = 0, .untracked = 0, .deleted = 0, .ahead = 0, .behind = 0 });
+        const is_empty = std.meta.eql(self.*, GitStatus{});
         if (is_empty) {
             return "";
         }
@@ -209,9 +194,6 @@ fn getGitStatusCached(_: std.mem.Allocator) !?GitStatus {
     const repo = git_repo_cache.?.repo;
     var res = GitStatus{};
 
-    // Check for special repository states first
-    try fillRepoState(repo, &res);
-
     try fillFileStats(repo, &res);
     try fillPushPullStats(repo, &res);
     return res;
@@ -230,13 +212,6 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
     defer git.git_repository_free(repo);
 
     var res = GitStatus{};
-
-    // Check for special repository states first
-    try fillRepoState(repo.?, &res);
-
-    // // 1. 获取分支信息
-    // try fillBranchInfo(allocator, repo.?, &res);
-
     try fillFileStats(repo.?, &res);
     try fillPushPullStats(repo.?, &res);
     return res;
@@ -277,62 +252,6 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
         if ((s & git.GIT_STATUS_WT_NEW) != 0) {
             res.untracked += 1;
         }
-    }
-}
-
-fn fillRepoState(repo: *git.git_repository, res: *GitStatus) !void {
-    const state = git.git_repository_state(repo);
-
-    // Repository state constants from libgit2
-    const GIT_REPOSITORY_STATE_MERGE = 1;
-    const GIT_REPOSITORY_STATE_REVERT = 2;
-    const GIT_REPOSITORY_STATE_REVERT_SEQUENCE = 3;
-    const GIT_REPOSITORY_STATE_CHERRYPICK = 4;
-    const GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE = 5;
-    const GIT_REPOSITORY_STATE_BISECT = 6;
-    const GIT_REPOSITORY_STATE_REBASE = 7;
-    const GIT_REPOSITORY_STATE_REBASE_INTERACTIVE = 8;
-    const GIT_REPOSITORY_STATE_REBASE_MERGE = 9;
-    const GIT_REPOSITORY_STATE_APPLY_MAILBOX = 10;
-    const GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE = 11;
-
-    switch (state) {
-        GIT_REPOSITORY_STATE_MERGE => {
-            res.merging = true;
-        },
-        GIT_REPOSITORY_STATE_REVERT => {
-            res.reverting = true;
-        },
-        GIT_REPOSITORY_STATE_REVERT_SEQUENCE => {
-            res.reverting_sequence = true;
-        },
-        GIT_REPOSITORY_STATE_CHERRYPICK => {
-            res.cherrypicking = true;
-        },
-        GIT_REPOSITORY_STATE_CHERRYPICK_SEQUENCE => {
-            res.cherrypicking_sequence = true;
-        },
-        GIT_REPOSITORY_STATE_BISECT => {
-            res.bisecting = true;
-        },
-        GIT_REPOSITORY_STATE_REBASE => {
-            res.rebasing = true;
-        },
-        GIT_REPOSITORY_STATE_REBASE_INTERACTIVE => {
-            res.rebase_interactive = true;
-        },
-        GIT_REPOSITORY_STATE_REBASE_MERGE => {
-            res.rebase_merge = true;
-        },
-        GIT_REPOSITORY_STATE_APPLY_MAILBOX => {
-            res.applying_mailbox = true;
-        },
-        GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE => {
-            res.applying_mailbox_or_rebase = true;
-        },
-        else => {
-            // Normal state, nothing special
-        },
     }
 }
 

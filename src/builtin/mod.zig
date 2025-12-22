@@ -58,6 +58,10 @@ pub const builtins = [_]Cmd{ .{
     .cmd = .{ .R = git.gitBranch },
     .format = "#[fg=magenta,bold] $output",
 }, .{
+    .name = "git_state",
+    .cmd = .{ .R = git.gitState },
+    .format = "#[fg=yellow,bold]$output",
+}, .{
     .name = "git_status",
     .cmd = .{ .R = git.gitStatus },
     .format = "#[fg=red,bold][$output]",
