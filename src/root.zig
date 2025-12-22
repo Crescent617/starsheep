@@ -7,8 +7,10 @@ const chameleon = @import("chameleon");
 const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
+pub const env = @import("env.zig");
 
 const git = @import("cmd/git.zig");
+const log = std.log.scoped(.root);
 
 pub const ShellState = struct {
     shell: []const u8 = "zsh",
@@ -70,7 +72,7 @@ pub const App = struct {
     const Self = @This();
 
     pub fn init(alloc: std.mem.Allocator) !App {
-        @import("env.zig").init();
+        env.init();
         var arr = std.ArrayList(Cmd).empty;
         try arr.appendSlice(alloc, &builtins);
 
@@ -210,6 +212,13 @@ pub const App = struct {
     }
 
     pub fn run(self: *App, out: *std.io.Writer) !void {
+        const start_time = if (env.DEBUG_MODE) std.time.milliTimestamp() else 0;
+        defer if (env.DEBUG_MODE) {
+            const end_time = std.time.milliTimestamp();
+            const duration = end_time - start_time;
+            log.info("prompt generation took {d} ms", .{duration});
+        };
+
         var buf = std.io.Writer.Allocating.init(self.alloc);
         defer buf.deinit();
 
