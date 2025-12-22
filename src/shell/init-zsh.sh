@@ -30,18 +30,11 @@ _starsheep_precmd() {
 
 # 3. 渲染 Prompt
 _starsheep_get_prompt() {
-    local starsheep_output
-    # 将预处理好的变量传递给 Zig 程序的子命令参数
-    starsheep_output=$(starsheep prompt \
+    starsheep prompt \
         --last-exit-code "$STARSHEEP_LAST_STATUS" \
         --last-duration-ms "$STARSHEEP_LAST_DURATION" \
         --jobs "$STARSHEEP_JOBS" \
-        2>/dev/null)
-    # 使用 Zsh 的参数扩展功能：
-    # %{...%} 告诉 Zsh 忽略其中的不可见字符
-    # 如果输出中包含多个颜色块，这种简单的整体包裹有时也管用，
-    # 但更标准的做法是使用 (ps:..:) 标志来解析：
-    print -rn -- "%{${starsheep_output}%}" # 不开会导致 tab 补全错位
+        2>/dev/null
 }
 
 # 注册钩子

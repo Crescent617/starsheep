@@ -3,7 +3,7 @@
 pkgs.mkShell {
   # nativeBuildInputs 包含编译时需要的工具（运行在构建主机上的工具）
   nativeBuildInputs = with pkgs; [
-    zig # 确保你的 nixpkgs 已经更新到包含 0.15.2 的版本
+    zig
     pkg-config # 极度重要：Zig 靠它在 NixOS 中找到 libgit2 的头文件和库路径
   ];
 
@@ -18,5 +18,7 @@ pkgs.mkShell {
   # 环境变量设置
   shellHook = ''
     echo "↯󱐋󱐋󱐋 Zig $(zig version) 󱐋󱐋󱐋"
+    # print pkgs path
+    # echo "Nixpkgs path: ${pkgs.path}"
   '';
 }

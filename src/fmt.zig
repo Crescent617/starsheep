@@ -6,7 +6,7 @@ pub fn format(
     format_str: ?[]const u8,
     out: []const u8,
     c: *chameleon.RuntimeChameleon,
-    w: *std.io.Writer,
+    w: anytype,
 ) !void {
     const fmt = format_str orelse {
         try w.writeAll(out);

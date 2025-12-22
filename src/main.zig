@@ -2,7 +2,7 @@ const std = @import("std");
 const yazap = @import("yazap");
 const Arg = yazap.Arg;
 const starsheep = @import("starsheep");
-const scripts = @import("scripts/mod.zig");
+const shell = starsheep.shell;
 
 pub fn main() !void {
     var gpa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -16,32 +16,31 @@ pub fn main() !void {
     var r = app.rootCommand();
     r.setProperty(.help_on_empty_args);
 
+    const shells = &[_][]const u8{"zsh"};
+
     var prompt = app.createCommand("prompt", "Generate and output the shell prompt");
     try prompt.addArg(Arg.singleValueOption("last-exit-code", null, "The exit code of the last executed command"));
     try prompt.addArg(Arg.singleValueOption("last-duration-ms", null, "The duration in milliseconds of the last executed command"));
     try prompt.addArg(Arg.singleValueOption("jobs", null, "The number of background jobs currently running"));
+    try prompt.addArg(Arg.singleValueOptionWithValidValues("shell", null, "The shell type to generate the initialization script for", shells));
     try r.addSubcommand(prompt);
 
     var init = app.createCommand("init", "Output shell initialization script");
-    try init.addArg(Arg.singleValueOptionWithValidValues(
-        "shell",
-        null,
-        "The shell type to generate the initialization script for",
-        &[_][]const u8{"zsh"},
-    ));
+    try init.addArg(Arg.singleValueOptionWithValidValues("shell", null, "The shell type to generate the initialization script for", shells));
     try r.addSubcommand(init);
 
     const matches = try app.parseProcess();
 
     if (matches.subcommandMatches("prompt")) |am| {
         try promptMain(allocator, .{
+            .shell = am.getSingleValue("shell") orelse "zsh",
             .last_exit_code = am.getSingleValue("last-exit-code"),
             .last_duration_ms = am.getSingleValue("last-duration-ms"),
             .jobs = am.getSingleValue("jobs"),
         });
     } else if (matches.subcommandMatches("init")) |am| {
         _ = am.getSingleValue("shell") orelse return error.MissingArgument;
-        try std.fs.File.stdout().writeAll(scripts.init_zsh_script);
+        try std.fs.File.stdout().writeAll(shell.init_zsh_script);
     } else {
         try app.displayHelp();
     }

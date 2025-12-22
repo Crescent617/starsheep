@@ -6,8 +6,10 @@ const builtins = @import("builtin/mod.zig").builtins;
 const chameleon = @import("chameleon");
 const fmt = @import("fmt.zig");
 const toml = @import("toml");
+pub const shell = @import("shell/mod.zig");
 
 pub const ShellState = struct {
+    shell: []const u8 = "zsh",
     last_exit_code: ?[]const u8 = null,
     last_duration_ms: ?[]const u8 = null,
     jobs: ?[]const u8 = null,
@@ -119,7 +121,12 @@ pub const App = struct {
         }
     }
 
-    pub fn run(self: *App, writer: *std.io.Writer) !void {
+    pub fn run(self: *App, out: *std.io.Writer) !void {
+        var buf = std.io.Writer.Allocating.init(self.alloc);
+        defer buf.deinit();
+
+        var writer = &buf.writer;
+
         _ = try writer.writeByte('\n');
 
         for (self.cmds.items) |cmd| {
@@ -159,6 +166,18 @@ pub const App = struct {
             }
         } else {
             try self.formatter.green().print(writer, "{s}", .{prompt_symbol});
+        }
+
+        const buf_slice = try buf.toOwnedSlice();
+        defer self.alloc.free(buf_slice);
+
+        // post process and write to out
+        if (std.mem.eql(u8, self.shell_state.shell, "zsh")) {
+            const final_str = try shell.wrapAnsiForZsh(self.alloc, buf_slice);
+            defer self.alloc.free(final_str);
+            try out.writeAll(final_str);
+        } else {
+            try out.writeAll(buf_slice);
         }
     }
 };
