@@ -31,6 +31,7 @@ _starsheep_precmd() {
 # 3. 渲染 Prompt
 _starsheep_get_prompt() {
     starsheep prompt \
+        --shell zsh \
         --last-exit-code "$STARSHEEP_LAST_STATUS" \
         --last-duration-ms "$STARSHEEP_LAST_DURATION" \
         --jobs "$STARSHEEP_JOBS"

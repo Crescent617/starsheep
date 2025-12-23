@@ -26,7 +26,7 @@ pub fn main() !void {
     try r.addSubcommand(prompt);
 
     var init = app.createCommand("init", "Output shell initialization script");
-    try init.addArg(Arg.singleValueOptionWithValidValues("shell", null, "The shell type to generate the initialization script for", shells));
+    try init.addArg(Arg.positional("shell", "The shell type to generate the initialization script for", null));
     try r.addSubcommand(init);
 
     const matches = try app.parseProcess();
@@ -39,8 +39,12 @@ pub fn main() !void {
             .jobs = am.getSingleValue("jobs"),
         });
     } else if (matches.subcommandMatches("init")) |am| {
-        _ = am.getSingleValue("shell") orelse return error.MissingArgument;
-        try std.fs.File.stdout().writeAll(shell.init_zsh_script);
+        const s = am.getSingleValue("shell") orelse return error.MissingArgument;
+        if (std.mem.eql(u8, s, "zsh")) {
+            try std.fs.File.stdout().writeAll(shell.init_zsh_script);
+        } else {
+            return error.UnsupportedShell;
+        }
     } else {
         try app.displayHelp();
     }
