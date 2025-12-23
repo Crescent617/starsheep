@@ -144,6 +144,7 @@ pub const GitStatus = struct {
     deleted: usize = 0,
     ahead: usize = 0,
     behind: usize = 0,
+    stashed: usize = 0,
 
     fn deinit(_: *const GitStatus, _: std.mem.Allocator) void {
         // noop
@@ -172,6 +173,9 @@ pub const GitStatus = struct {
         if (self.deleted > 0) {
             try buf.appendSlice(alloc, "✘");
         }
+        if (self.stashed > 0) {
+            try buf.appendSlice(alloc, "$");
+        }
 
         if (self.ahead > 0 and self.behind > 0) {
             try buf.appendSlice(alloc, "");
@@ -196,6 +200,7 @@ fn getGitStatusCached(_: std.mem.Allocator) !?GitStatus {
 
     try fillFileStats(repo, &res);
     try fillPushPullStats(repo, &res);
+    try fillStashStats(repo, &res);
     return res;
 }
 
@@ -214,6 +219,7 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
     var res = GitStatus{};
     try fillFileStats(repo.?, &res);
     try fillPushPullStats(repo.?, &res);
+    try fillStashStats(repo.?, &res);
     return res;
 }
 
@@ -252,6 +258,22 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
         if ((s & git.GIT_STATUS_WT_NEW) != 0) {
             res.untracked += 1;
         }
+    }
+}
+
+fn fillStashStats(repo: *git.git_repository, res: *GitStatus) !void {
+    // 使用 git_revparse_single 检查是否存在 stash ref
+    var object: ?*git.git_object = null;
+    defer {
+        // 确保总是释放对象（如果存在）
+        if (object) |obj| {
+            git.git_object_free(obj);
+        }
+    }
+
+    const result = git.git_revparse_single(&object, repo, "refs/stash");
+    if (result == 0) {
+        res.stashed = 1; // 找到 stash
     }
 }
 
