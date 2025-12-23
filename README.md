@@ -23,23 +23,6 @@ A blazingly fast, customizable shell prompt generator written in Zig. Starsheep 
 
 ### Installation
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/starsheep.git
-cd starsheep
-```
-
-2. Build the project:
-```bash
-zig build
-```
-
-3. Install to your system:
-```bash
-zig build install
-```
-
-4. Add to your `.zshrc`:
 ```bash
 # Add starsheep to your PATH
 export PATH="$PATH:/path/to/starsheep/zig-out/bin"
@@ -57,7 +40,7 @@ eval "$(starsheep init --shell zsh)"
 starsheep prompt
 
 # Initialize shell integration
-starsheep init
+starsheep init zsh
 ```
 
 ### Configuration
@@ -86,35 +69,14 @@ Starsheep includes many built-in commands:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/starsheep.git
+git clone https://github.com/Crescent617/starsheep.git
 cd starsheep
-
-# Build the project
-zig build
 
 # Run tests
 zig build test
 
 # Run the application
-zig build run
-```
-
-
-### Architecture
-
-Starsheep is built with a modular architecture:
-
-- **Command System**: Commands can be shell strings or Zig functions
-- **Conditional Execution**: Commands can have `when` conditions
-- **Variable Substitution**: `$output` in format strings gets replaced with command output
-- **Tmux-style Formatting**: Uses `#[fg=red,bg=black,bold]` syntax
-
-## 🧪 Testing
-
-Run the test suite:
-
-```bash
-zig build test
+zig build run -- prompt
 ```
 
 ## 📄 License
