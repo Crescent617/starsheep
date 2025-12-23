@@ -137,18 +137,59 @@ const RepoState = enum(u32) {
     APPLY_MAILBOX_OR_REBASE = git.GIT_REPOSITORY_STATE_APPLY_MAILBOX_OR_REBASE,
 };
 
+// Bit flags for git status
+const STAGED: u8 = 1 << 0; // 0b00000001
+const UNSTAGED: u8 = 1 << 1; // 0b00000010
+const UNTRACKED: u8 = 1 << 2; // 0b00000100
+const DELETED: u8 = 1 << 3; // 0b00001000
+const STASHED: u8 = 1 << 4; // 0b00010000
+const CONFLICTED: u8 = 1 << 5; // 0b00100000
+
 pub const GitStatus = struct {
-    staged: usize = 0,
-    unstaged: usize = 0,
-    untracked: usize = 0,
-    deleted: usize = 0,
+    flags: u8 = 0,
     ahead: usize = 0,
     behind: usize = 0,
-    stashed: usize = 0,
-    conflicted: usize = 0,
 
     fn deinit(_: *const GitStatus, _: std.mem.Allocator) void {
         // noop
+    }
+
+    // Helper methods to check flags
+    fn isSet(self: *const GitStatus, flag: u8) bool {
+        return (self.flags & flag) != 0;
+    }
+
+    fn setFlag(self: *GitStatus, flag: u8) void {
+        self.flags |= flag;
+    }
+
+    fn clearFlag(self: *GitStatus, flag: u8) void {
+        self.flags &= ~flag;
+    }
+
+    // Property getters
+    fn staged(self: *const GitStatus) bool {
+        return self.isSet(STAGED);
+    }
+
+    fn unstaged(self: *const GitStatus) bool {
+        return self.isSet(UNSTAGED);
+    }
+
+    fn untracked(self: *const GitStatus) bool {
+        return self.isSet(UNTRACKED);
+    }
+
+    fn deleted(self: *const GitStatus) bool {
+        return self.isSet(DELETED);
+    }
+
+    fn stashed(self: *const GitStatus) bool {
+        return self.isSet(STASHED);
+    }
+
+    fn conflicted(self: *const GitStatus) bool {
+        return self.isSet(CONFLICTED);
     }
 
     fn statusStr(self: *const GitStatus, alloc: std.mem.Allocator) ![]const u8 {
@@ -162,33 +203,37 @@ pub const GitStatus = struct {
 
         try buf.ensureTotalCapacity(alloc, 10);
 
-        if (self.untracked > 0) {
+        if (self.untracked()) {
             try buf.appendSlice(alloc, "?");
         }
-        if (self.unstaged > 0) {
+        if (self.unstaged()) {
             try buf.appendSlice(alloc, "!");
         }
-        if (self.staged > 0) {
+        if (self.staged()) {
             try buf.appendSlice(alloc, "+");
         }
-        if (self.deleted > 0) {
+        if (self.deleted()) {
             try buf.appendSlice(alloc, "✘");
         }
-        if (self.conflicted > 0) {
+        if (self.conflicted()) {
             try buf.appendSlice(alloc, " ");
         }
-        if (self.stashed > 0) {
+        if (self.stashed()) {
             try buf.appendSlice(alloc, "$");
         }
 
-        if (self.ahead > 0 and self.behind > 0) {
-            try buf.appendSlice(alloc, "");
-        } else {
-            if (self.ahead > 0) {
-                try buf.appendSlice(alloc, "󰁞");
+        if (self.ahead > 0) {
+            try buf.appendSlice(alloc, "󰁞");
+            // Optionally append the number
+            if (self.ahead > 1) {
+                try std.fmt.format(buf.writer(alloc), "{d}", .{self.ahead});
             }
-            if (self.behind > 0) {
-                try buf.appendSlice(alloc, "󰁆");
+        }
+        if (self.behind > 0) {
+            try buf.appendSlice(alloc, "󰁆");
+            // Optionally append the number
+            if (self.behind > 1) {
+                try std.fmt.format(buf.writer(alloc), "{d}", .{self.behind});
             }
         }
         return try buf.toOwnedSlice(alloc);
@@ -230,8 +275,7 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
 fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
     var status_options = std.mem.zeroInit(git.git_status_options, .{});
     status_options.version = git.GIT_STATUS_OPTIONS_VERSION;
-    // 包含未追踪的文件，并递归遍历子目录
-    status_options.flags = git.GIT_STATUS_OPT_INCLUDE_UNTRACKED | git.GIT_STATUS_OPT_RECURSE_UNTRACKED_DIRS;
+    status_options.flags = git.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
 
     var status_list: ?*git.git_status_list = null;
     if (git.git_status_list_new(&status_list, repo, &status_options) < 0) return error.GitStatusError;
@@ -245,27 +289,32 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
 
         // 检测冲突状态
         if ((s & git.GIT_STATUS_CONFLICTED) != 0) {
-            res.conflicted += 1;
+            res.setFlag(CONFLICTED);
         }
 
         // 统计 Staged (暂存区)
         if ((s & (git.GIT_STATUS_INDEX_NEW | git.GIT_STATUS_INDEX_MODIFIED | git.GIT_STATUS_INDEX_DELETED)) != 0) {
-            res.staged += 1;
+            res.setFlag(STAGED);
         }
 
         // deleted 文件单独统计
         if ((s & (git.GIT_STATUS_INDEX_DELETED | git.GIT_STATUS_WT_DELETED)) != 0) {
-            res.deleted += 1;
+            res.setFlag(DELETED);
         }
 
         // 统计 Unstaged (已修改未暂存)
         if ((s & (git.GIT_STATUS_WT_MODIFIED | git.GIT_STATUS_WT_DELETED)) != 0) {
-            res.unstaged += 1;
+            res.setFlag(UNSTAGED);
         }
 
         // 统计 Untracked (未追踪)
         if ((s & git.GIT_STATUS_WT_NEW) != 0) {
-            res.untracked += 1;
+            res.setFlag(UNTRACKED);
+        }
+
+        // Early exit optimization: if all flags are already set, we can exit early
+        if (res.flags == (STAGED | UNSTAGED | UNTRACKED | DELETED | CONFLICTED)) {
+            break;
         }
     }
 }
@@ -282,7 +331,7 @@ fn fillStashStats(repo: *git.git_repository, res: *GitStatus) !void {
 
     const result = git.git_revparse_single(&object, repo, "refs/stash");
     if (result == 0) {
-        res.stashed = 1; // 找到 stash
+        res.setFlag(STASHED); // 找到 stash
     }
 }
 
@@ -331,7 +380,6 @@ test "fetchGitStatus" {
         std.debug.print("{}\n", .{status});
     }
 
-    // Test with non-git directory
     const nonGitResult = try getGitStatus(allocator, "/tmp");
     try testing.expect(nonGitResult == null);
 }

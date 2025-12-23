@@ -17,8 +17,6 @@ pkgs.mkShell {
 
   # 环境变量设置
   shellHook = ''
-    echo "↯󱐋󱐋󱐋 Zig $(zig version) 󱐋󱐋󱐋"
-    # print pkgs path
-    # echo "Nixpkgs path: ${pkgs.path}"
+    echo "󱐋󱐋󱐋 Zig $(zig version) 󱐋󱐋󱐋"
   '';
 }
