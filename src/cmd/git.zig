@@ -145,6 +145,7 @@ pub const GitStatus = struct {
     ahead: usize = 0,
     behind: usize = 0,
     stashed: usize = 0,
+    conflicted: usize = 0,
 
     fn deinit(_: *const GitStatus, _: std.mem.Allocator) void {
         // noop
@@ -159,7 +160,7 @@ pub const GitStatus = struct {
         var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(alloc);
 
-        try buf.ensureTotalCapacity(alloc, 6);
+        try buf.ensureTotalCapacity(alloc, 10);
 
         if (self.untracked > 0) {
             try buf.appendSlice(alloc, "?");
@@ -172,6 +173,9 @@ pub const GitStatus = struct {
         }
         if (self.deleted > 0) {
             try buf.appendSlice(alloc, "✘");
+        }
+        if (self.conflicted > 0) {
+            try buf.appendSlice(alloc, " ");
         }
         if (self.stashed > 0) {
             try buf.appendSlice(alloc, "$");
@@ -238,6 +242,11 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
     while (i < count) : (i += 1) {
         const entry = git.git_status_byindex(status_list, i);
         const s = entry.*.status;
+
+        // 检测冲突状态
+        if ((s & git.GIT_STATUS_CONFLICTED) != 0) {
+            res.conflicted += 1;
+        }
 
         // 统计 Staged (暂存区)
         if ((s & (git.GIT_STATUS_INDEX_NEW | git.GIT_STATUS_INDEX_MODIFIED | git.GIT_STATUS_INDEX_DELETED)) != 0) {
