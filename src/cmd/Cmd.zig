@@ -19,13 +19,17 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
         return false;
     }
 
-    const start_time = if (env.DEBUG_MODE) std.time.milliTimestamp() else 0;
-    defer if (env.DEBUG_MODE) {
+    const start_time = std.time.milliTimestamp();
+    defer {
         const end_time = std.time.milliTimestamp();
         const duration = end_time - start_time;
-        if (duration > 1)
+        if (duration > 1 and env.DEBUG_MODE)
             log.info("check\t'{s}'\ttook {}ms", .{ self.name, duration });
-    };
+
+        if (duration >= self.timeout_ms) {
+            log.warn("check whem for '{s}' took too long ({}ms)", .{ self.name, duration });
+        }
+    }
 
     switch (self.when) {
         .L => |s| {
@@ -45,13 +49,17 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
 
 /// Evaluate the 'when' condition and return any output
 pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
-    const start_time = if (env.DEBUG_MODE) std.time.milliTimestamp() else 0;
-    defer if (env.DEBUG_MODE) {
+    const start_time = std.time.milliTimestamp();
+    defer {
         const end_time = std.time.milliTimestamp();
         const duration = end_time - start_time;
-        if (duration > 1)
+        if (duration > 1 and env.DEBUG_MODE)
             log.info("'{s}'\ttook {}ms", .{ self.name, duration });
-    };
+
+        if (duration >= self.timeout_ms) {
+            log.warn("command '{s}' took too long ({}ms)", .{ self.name, duration });
+        }
+    }
 
     switch (self.cmd) {
         .L => |cmd_str| {
