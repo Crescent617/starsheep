@@ -24,7 +24,7 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
         const end_time = std.time.milliTimestamp();
         const duration = end_time - start_time;
         if (duration > 1)
-            log.info("check\t'{s}'\ttook {}ms", .{ self.name, duration });
+            log.info("check\t[{s}]\ttook {}ms", .{ self.name, duration });
     };
 
     switch (self.when) {
@@ -50,7 +50,7 @@ pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
         const end_time = std.time.milliTimestamp();
         const duration = end_time - start_time;
         if (duration > 1)
-            log.info("'{s}'\ttook {}ms", .{ self.name, duration });
+            log.info("[{s}]\ttook {}ms", .{ self.name, duration });
     };
 
     switch (self.cmd) {

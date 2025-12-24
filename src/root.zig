@@ -8,6 +8,7 @@ const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
 pub const env = @import("env.zig");
+const util = @import("util/types.zig");
 
 const git = @import("cmd/git.zig");
 const log = std.log.scoped(.root);
@@ -68,6 +69,7 @@ pub const App = struct {
     formatter: chameleon.RuntimeChameleon,
     parsed_conf: ?toml.Parsed(Conf) = null,
     shell_state: ShellState = .{},
+    cmd_timeouts_ms: u64 = 500,
 
     const Self = @This();
 
@@ -129,40 +131,55 @@ pub const App = struct {
     }
 
     /// Execute commands and collect their results
-    fn executeCommands(self: *App, results: [][]const u8) !void {
-        var threads: std.ArrayList(std.Thread) = .empty;
-        defer threads.deinit(self.alloc);
-
-        try threads.ensureTotalCapacity(self.alloc, self.cmds.items.len);
+    /// results: array of optional string slices to hold command outputs, null if not completed
+    fn executeCommands(self: *App, results: []?[]const u8) !void {
+        var wg = std.Thread.WaitGroup{};
+        var ctx = util.ThreadContext{};
 
         // Second pass: evaluate commands that are needed
         for (self.cmds.items, 0..) |cmd, i| {
-            if (!try cmd.needsEval(self.alloc)) continue;
+            if (!try cmd.needsEval(self.alloc)) {
+                results[i] = "";
+                continue;
+            }
 
-            const t = try std.Thread.spawn(.{}, struct {
-                fn f(c: *const Cmd, result_ptr: *[]const u8) void {
-                    const res = c.eval(std.heap.page_allocator) catch {
-                        result_ptr.* = "";
+            wg.spawnManager(struct {
+                fn f(alloc: std.mem.Allocator, c: *const Cmd, ptr: *?[]const u8, cx: *util.ThreadContext) void {
+                    const res = c.eval(alloc) catch {
                         return;
                     };
-                    result_ptr.* = res;
+                    if (cx.isDone()) {
+                        return;
+                    }
+                    ptr.* = res;
                 }
-            }.f, .{ &self.cmds.items[i], &results[i] });
-
-            try threads.append(self.alloc, t);
+            }.f, .{ self.alloc, &self.cmds.items[i], &results[i], &ctx });
         }
 
-        for (threads.items) |t| {
-            t.join();
-        }
+        // Wait for all threads to complete
+        try ctx.run(std.Thread.WaitGroup.wait, .{&wg});
+
+        ctx.timedWait(self.cmd_timeouts_ms * std.time.ns_per_ms) catch |err| {
+            if (err != error.Timeout) {
+                log.err("error while waiting for command execution: {s}", .{err});
+                return err;
+            }
+            for (self.cmds.items, results) |cmd, res| {
+                if (res == null) {
+                    log.warn("command [{s}] timed out {d}ms", .{ cmd.name, self.cmd_timeouts_ms });
+                }
+            }
+        };
     }
 
     /// Format and write command results to the writer
-    fn writeCommandResults(self: *App, writer: anytype, results: []const []const u8) !void {
+    fn writeCommandResults(self: *App, writer: anytype, results: []const ?[]const u8) !void {
         for (self.cmds.items, results) |cmd, res| {
-            if (res.len == 0) continue;
-            try fmt.format(self.alloc, cmd.format, res, &self.formatter, writer);
-            _ = try writer.writeByte(' ');
+            if (res) |r| {
+                if (r.len == 0) continue;
+                try fmt.format(self.alloc, cmd.format, r, &self.formatter, writer);
+                _ = try writer.writeByte(' ');
+            }
         }
     }
 
@@ -226,10 +243,13 @@ pub const App = struct {
         _ = try writer.writeByte('\n');
 
         // Run commands in parallel for better performance
-        const results = try self.alloc.alloc([]const u8, self.cmds.items.len);
+        const results = try self.alloc.alloc(?[]const u8, self.cmds.items.len);
+        for (results) |*res| {
+            res.* = null;
+        }
         defer {
             for (results) |res| {
-                if (res.len > 0) self.alloc.free(res);
+                if (res) |r| if (r.len > 0) self.alloc.free(r);
             }
             self.alloc.free(results);
         }
