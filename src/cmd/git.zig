@@ -281,7 +281,7 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
     if (git.git_status_list_new(&status_list, repo, &status_options) < 0) return error.GitStatusError;
     defer git.git_status_list_free(status_list);
 
-    const count = git.git_status_list_entrycount(status_list);
+    const count = @min(git.git_status_list_entrycount(status_list), 1000);
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const entry = git.git_status_byindex(status_list, i);
