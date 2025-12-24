@@ -139,15 +139,15 @@ pub const App = struct {
         for (self.cmds.items, 0..) |cmd, i| {
             if (!try cmd.needsEval(self.alloc)) continue;
 
-            const t = try std.Thread.spawn(.{}, struct {
-                fn f(c: *const Cmd, result_ptr: *[]const u8) void {
-                    const res = c.eval(std.heap.page_allocator) catch {
+            const t = try std.Thread.spawn(.{ .allocator = self.alloc }, struct {
+                fn f(alloc: std.mem.Allocator, c: *const Cmd, result_ptr: *[]const u8) void {
+                    const res = c.eval(alloc) catch {
                         result_ptr.* = "";
                         return;
                     };
                     result_ptr.* = res;
                 }
-            }.f, .{ &self.cmds.items[i], &results[i] });
+            }.f, .{ self.alloc, &self.cmds.items[i], &results[i] });
 
             try threads.append(self.alloc, t);
         }
