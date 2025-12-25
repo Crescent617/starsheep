@@ -139,9 +139,9 @@ pub const App = struct {
         for (self.cmds.items, 0..) |cmd, i| {
             if (!try cmd.needsEval(self.alloc)) continue;
 
-            // Make a copy of the command to avoid pointer stability issues
+            // Capture command by value for thread isolation to avoid pointer stability issues
             // when the ArrayList slice is accessed across threads
-            const cmd_copy = cmd;
+            const thread_cmd = cmd;
             const t = try std.Thread.spawn(.{ .allocator = self.alloc }, struct {
                 fn f(alloc: std.mem.Allocator, c: Cmd, result_ptr: *[]const u8) void {
                     const res = c.eval(alloc) catch {
@@ -150,7 +150,7 @@ pub const App = struct {
                     };
                     result_ptr.* = res;
                 }
-            }.f, .{ self.alloc, cmd_copy, &results[i] });
+            }.f, .{ self.alloc, thread_cmd, &results[i] });
 
             try threads.append(self.alloc, t);
         }
