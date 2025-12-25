@@ -28,7 +28,7 @@ A blazingly fast, customizable shell prompt generator written in Zig. Starsheep 
 export PATH="$PATH:/path/to/starsheep/zig-out/bin"
 
 # Initialize starsheep
-eval "$(starsheep init --shell zsh)"
+eval "$(starsheep init zsh)"
 ```
 
 ## 📖 Usage
