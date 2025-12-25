@@ -145,15 +145,22 @@ pub const App = struct {
             const thread_cmd = cmd;
             const t = try std.Thread.spawn(.{ .allocator = self.alloc }, struct {
                 // Note: 'c' is passed by value to ensure thread-safe access without
-                // depending on the stability of ArrayList's internal buffer pointer
-                fn f(alloc: std.mem.Allocator, c: Cmd, result_ptr: *[]const u8) void {
-                    const res = c.eval(alloc) catch {
+                // depending on the stability of ArrayList's internal buffer pointer.
+                // Each thread gets its own ArenaAllocator for thread-safe memory allocation.
+                fn f(c: Cmd, result_ptr: *[]const u8) void {
+                    // Create a thread-local arena allocator for safe concurrent allocation
+                    var thread_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                    defer thread_arena.deinit();
+                    const thread_alloc = thread_arena.allocator();
+
+                    const res = c.eval(thread_alloc) catch {
                         result_ptr.* = "";
                         return;
                     };
-                    result_ptr.* = res;
+                    // Duplicate result to a stable allocator before arena is freed
+                    result_ptr.* = std.heap.page_allocator.dupe(u8, res) catch "";
                 }
-            }.f, .{ self.alloc, thread_cmd, &results[i] });
+            }.f, .{ thread_cmd, &results[i] });
 
             try threads.append(self.alloc, t);
         }
@@ -235,7 +242,8 @@ pub const App = struct {
         const results = try self.alloc.alloc([]const u8, self.cmds.items.len);
         defer {
             for (results) |res| {
-                if (res.len > 0) self.alloc.free(res);
+                // Results are allocated with page_allocator in thread context
+                if (res.len > 0) std.heap.page_allocator.free(res);
             }
             self.alloc.free(results);
         }
