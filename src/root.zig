@@ -158,7 +158,10 @@ pub const App = struct {
                         return;
                     };
                     // Duplicate result to a stable allocator before arena is freed
-                    result_ptr.* = std.heap.page_allocator.dupe(u8, res) catch "";
+                    result_ptr.* = std.heap.page_allocator.dupe(u8, res) catch |err| {
+                        log.warn("Failed to duplicate command result: {}", .{err});
+                        return "";
+                    };
                 }
             }.f, .{ thread_cmd, &results[i] });
 
