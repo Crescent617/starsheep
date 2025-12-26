@@ -5,10 +5,7 @@ const starsheep = @import("starsheep");
 const shell = starsheep.shell;
 
 pub fn main() !void {
-    var gpa = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer gpa.deinit();
-
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
 
     var app = yazap.App.init(allocator, "starsheep", "A customizable shell prompt generator");
     defer app.deinit();
