@@ -34,29 +34,35 @@ pub const ShellState = struct {
         const MIN = 1000 * 60;
         const SEC = 1000;
 
+        const writer = arr.writer(alloc);
+
         if (dur_ms >= DAY) {
             const days = dur_ms / DAY;
-            try arr.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d}d", .{days}));
-            dur_ms = dur_ms % DAY;
+            try writer.print("{d}d", .{days});
+            dur_ms %= DAY;
         }
+
         if (dur_ms >= HOUR) {
             const hours = dur_ms / HOUR;
-            try arr.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d}h", .{hours}));
-            dur_ms = dur_ms % HOUR;
+            try writer.print("{d}h", .{hours});
+            dur_ms %= HOUR;
         }
+
         if (dur_ms >= MIN) {
             const mins = dur_ms / MIN;
-            try arr.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d}m", .{mins}));
-            dur_ms = dur_ms % MIN;
+            try writer.print("{d}m", .{mins});
+            dur_ms %= MIN;
         }
+
         if (dur_ms >= SEC) {
             const secs = dur_ms / SEC;
-            try arr.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d}s", .{secs}));
-            dur_ms = dur_ms % SEC;
+            try writer.print("{d}s", .{secs});
+            dur_ms %= SEC;
         }
-        // only show ms if duration > 100ms and no other units
+
+        // 只有在无其他单位且 > 100ms 时显示
         if (dur_ms > 100 and arr.items.len == 0) {
-            try arr.appendSlice(alloc, try std.fmt.allocPrint(alloc, "{d}ms", .{dur_ms}));
+            try writer.print("{d}ms", .{dur_ms});
         }
         return try arr.toOwnedSlice(alloc);
     }
@@ -169,6 +175,7 @@ pub const App = struct {
     /// Write timing information if available
     fn writeTiming(self: *App, writer: *std.Io.Writer) !void {
         const lastDur = try self.shell_state.lastDurationMs(self.alloc);
+        defer self.alloc.free(lastDur);
         if (lastDur.len != 0) {
             try self.formatter.gray().print(writer, "⏱ {s}", .{lastDur});
         }
