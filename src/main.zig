@@ -3,9 +3,13 @@ const yazap = @import("yazap");
 const Arg = yazap.Arg;
 const starsheep = @import("starsheep");
 const shell = starsheep.shell;
+const builtin = @import("builtin");
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = builtin.mode == .Debug }){};
+    defer _ = gpa.deinit();
+
+    const allocator = gpa.allocator();
 
     var app = yazap.App.init(allocator, "starsheep", "A customizable shell prompt generator");
     defer app.deinit();
