@@ -7,7 +7,7 @@ pub fn curDir(alloc: std.mem.Allocator) []const u8 {
     defer alloc.free(cwd);
 
     // Find .git directory upwards
-    if (util.statFileUpwards(alloc, ".", ".git")) |git_dir| {
+    if (util.findFileUpwards(alloc, ".", ".git")) |git_dir| {
         defer git_dir.deinit(alloc);
 
         // Get the git repository root (parent of .git)

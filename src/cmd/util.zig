@@ -1,15 +1,14 @@
 const std = @import("std");
 
-pub const PathInfo = struct {
-    stat: std.fs.File.Stat,
+pub const FileInfo = struct {
     path: []const u8,
 
-    pub fn deinit(self: *const PathInfo, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *const FileInfo, allocator: std.mem.Allocator) void {
         allocator.free(self.path);
     }
 };
 
-pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?PathInfo {
+pub fn findFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?FileInfo {
     // 先规范化为绝对路径，避免 ".." 等造成判断异常
     const p = std.fs.cwd().realpathAlloc(allocator, start_dir) catch return null;
     defer allocator.free(p);
@@ -17,11 +16,11 @@ pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, file
     var cur: []const u8 = p;
 
     while (true) {
-        if (statFile(allocator, cur, filename)) |res| {
-            return PathInfo{
-                .stat = res,
-                .path = std.fs.path.join(allocator, &.{ cur, filename }) catch return null,
-            };
+        const file = std.fs.path.join(allocator, &.{ cur, filename }) catch return null;
+        if (std.fs.cwd().access(file, .{})) |_| return FileInfo{
+            .path = file,
+        } else |_| {
+            defer allocator.free(file);
         }
 
         const parent = std.fs.path.dirname(cur) orelse break;
@@ -36,22 +35,12 @@ pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, file
 }
 
 pub fn existsFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) bool {
-    const res = statFileUpwards(allocator, start_dir, filename);
+    const res = findFileUpwards(allocator, start_dir, filename);
     if (res) |p| {
         p.deinit(allocator);
         return true;
     }
     return false;
-}
-
-fn statFile(allocator: std.mem.Allocator, base: []const u8, child: []const u8) ?std.fs.File.Stat {
-    const full = std.fs.path.join(allocator, &.{ base, child }) catch return null;
-    defer allocator.free(full);
-
-    const stat = std.fs.cwd().statFile(full) catch {
-        return null;
-    };
-    return stat;
 }
 
 pub fn runSubprocess(allocator: std.mem.Allocator, cmd: []const []const u8) ![]const u8 {
