@@ -1,15 +1,16 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
-const Cmd = @import("cmd/Cmd.zig");
+const Cmd = @import("Cmd.zig");
 pub const Conf = @import("conf.zig").AppConf;
-const builtins = @import("cmd/mod.zig").builtins;
+const builtins = @import("mods/mod.zig").builtins;
 const chameleon = @import("chameleon");
 const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
 pub const env = @import("env.zig");
+const ThreadCtx = @import("util/ThreadCtx.zig");
 
-const git = @import("cmd/git.zig");
+const git = @import("mods/git.zig");
 const log = std.log.scoped(.root);
 
 pub const ShellState = struct {
@@ -74,6 +75,7 @@ pub const App = struct {
     formatter: chameleon.RuntimeChameleon,
     parsed_conf: ?toml.Parsed(Conf) = null,
     shell_state: ShellState = .{},
+    timeout_ms: u64 = 500, // TODO: make it works
 
     const Self = @This();
 
@@ -136,30 +138,39 @@ pub const App = struct {
 
     /// Execute commands and collect their results
     fn executeCommands(self: *App, results: [][]const u8) !void {
-        var threads: std.ArrayList(std.Thread) = .empty;
-        defer threads.deinit(self.alloc);
-
-        try threads.ensureTotalCapacity(self.alloc, self.cmds.items.len);
+        var wg = std.Thread.WaitGroup{};
 
         // Second pass: evaluate commands that are needed
-        for (self.cmds.items, 0..) |cmd, i| {
+        for (self.cmds.items, results) |*cmd, *res| {
             if (!try cmd.needsEval(self.alloc)) continue;
 
-            const t = try std.Thread.spawn(.{ .allocator = self.alloc }, struct {
-                fn f(alloc: std.mem.Allocator, c: *const Cmd, result_ptr: *[]const u8) void {
-                    const res = c.eval(alloc) catch {
+            wg.spawnManager(struct {
+                fn f(alloc: std.mem.Allocator, c: *Cmd, result_ptr: *[]const u8) void {
+                    const r = c.eval(alloc) catch {
                         result_ptr.* = "";
                         return;
                     };
-                    result_ptr.* = res;
+                    result_ptr.* = r;
                 }
-            }.f, .{ self.alloc, &self.cmds.items[i], &results[i] });
-
-            try threads.append(self.alloc, t);
+            }.f, .{ self.alloc, cmd, res });
         }
 
-        for (threads.items) |t| {
-            t.join();
+        wg.wait();
+
+        for (self.cmds.items) |cmd| {
+            if (env.DEBUG_MODE and cmd.stats.neesds_eval and (cmd.stats.eval_duration_ms orelse 1) > 1) {
+                log.info("time usage: [{s}]\tcheck={d}ms\teval={d}ms", .{
+                    cmd.name,
+                    cmd.stats.check_duration_ms orelse 0,
+                    cmd.stats.eval_duration_ms orelse 0,
+                });
+            }
+
+            if (!cmd.stats.neesds_eval) continue;
+            if (cmd.stats.eval_duration_ms) |dur| {
+                if (dur > self.timeout_ms)
+                    log.warn("[{s}] took too long: {d} ms", .{ cmd.name, dur });
+            }
         }
     }
 
@@ -234,6 +245,9 @@ pub const App = struct {
 
         // Run commands in parallel for better performance
         const results = try self.alloc.alloc([]const u8, self.cmds.items.len);
+        for (results) |*res| {
+            res.* = "";
+        }
         defer {
             for (results) |res| {
                 if (res.len > 0) self.alloc.free(res);

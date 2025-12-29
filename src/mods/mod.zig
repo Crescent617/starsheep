@@ -1,7 +1,7 @@
 const std = @import("std");
 const dir = @import("dir.zig");
 const git = @import("git.zig");
-const Cmd = @import("Cmd.zig");
+const Cmd = @import("../Cmd.zig");
 const util = @import("util.zig");
 
 pub const builtins = [_]Cmd{ .{

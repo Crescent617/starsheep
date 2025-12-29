@@ -1,64 +1,59 @@
 const Cmd = @This();
 const Self = Cmd;
-const Either = @import("../util/types.zig").Either;
+const Either = @import("util/types.zig").Either;
 
 const std = @import("std");
-const fmt = @import("../fmt.zig");
-const env = @import("../env.zig");
+const fmt = @import("fmt.zig");
+const env = @import("env.zig");
 const log = std.log.scoped(.cmd);
+
+pub const Stats = struct {
+    neesds_eval: bool = false,
+    check_duration_ms: ?i64 = null,
+    eval_duration_ms: ?i64 = null,
+};
 
 name: []const u8,
 cmd: Either([]const u8, *const fn (std.mem.Allocator) []const u8),
 when: Either([]const u8, *const fn (std.mem.Allocator) bool) = .{ .L = "" },
 format: ?[]const u8 = null, // use tmux style format strings, e.g. #[fg=blue,bg=black,bold,underscore]
 enabled: bool = true,
-timeout_ms: u64 = 500,
+stats: Stats = .{},
 
-pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
+pub fn needsEval(self: *Self, alloc: std.mem.Allocator) !bool {
     if (!self.enabled) {
         return false;
     }
 
     const start_time = std.time.milliTimestamp();
     defer {
-        const end_time = std.time.milliTimestamp();
-        const duration = end_time - start_time;
-        if (duration > 1 and env.DEBUG_MODE)
-            log.info("check\t'{s}'\ttook {}ms", .{ self.name, duration });
-
-        if (duration >= self.timeout_ms) {
-            log.warn("check whem for '{s}' took too long ({}ms)", .{ self.name, duration });
-        }
+        self.stats.check_duration_ms = std.time.milliTimestamp() - start_time;
     }
 
     switch (self.when) {
         .L => |s| {
             if (s.len == 0) {
-                return true;
+                self.stats.neesds_eval = true;
+                return self.stats.neesds_eval;
             }
             // execute when_str and check exit code
             var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", s }, alloc);
             const exit_code = try process.spawnAndWait();
-            return exit_code.Exited == 0;
+            self.stats.neesds_eval = (exit_code.Exited == 0);
         },
         .R => |f| {
-            return f(alloc);
+            self.stats.neesds_eval = f(alloc);
         },
     }
+
+    return self.stats.neesds_eval;
 }
 
 /// Evaluate the 'when' condition and return any output
-pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
+pub fn eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
     const start_time = std.time.milliTimestamp();
     defer {
-        const end_time = std.time.milliTimestamp();
-        const duration = end_time - start_time;
-        if (duration > 1 and env.DEBUG_MODE)
-            log.info("'{s}'\ttook {}ms", .{ self.name, duration });
-
-        if (duration >= self.timeout_ms) {
-            log.warn("command '{s}' took too long ({}ms)", .{ self.name, duration });
-        }
+        self.stats.eval_duration_ms = std.time.milliTimestamp() - start_time;
     }
 
     switch (self.cmd) {
