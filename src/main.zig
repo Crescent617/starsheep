@@ -34,7 +34,7 @@ pub fn main() !void {
 
     if (matches.subcommandMatches("prompt")) |am| {
         try promptMain(allocator, .{
-            .shell = am.getSingleValue("shell") orelse "zsh",
+            .shell = am.getSingleValue("shell") orelse "",
             .last_exit_code = am.getSingleValue("last-exit-code"),
             .last_duration_ms = am.getSingleValue("last-duration-ms"),
             .jobs = am.getSingleValue("jobs"),

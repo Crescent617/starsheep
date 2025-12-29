@@ -2,7 +2,7 @@ const std = @import("std");
 const toml = @import("toml");
 
 pub const AppConf = struct {
-    cmds: []CmdConf,
+    cmds: []CmdConf = &[_]CmdConf{},
 
     pub fn fromToml(
         allocator: std.mem.Allocator,

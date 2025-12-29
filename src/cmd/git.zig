@@ -10,8 +10,13 @@ pub const Err = error{
 };
 
 fn init() void {
+    const start_time = std.time.milliTimestamp();
     _ = git.git_libgit2_init();
+    const inited = std.time.milliTimestamp();
+    std.log.debug("libgit2 initialized in {d} ms", .{inited - start_time});
     git_repo_cache = GitRepoCache.init();
+    const cache_time = std.time.milliTimestamp();
+    std.log.debug("GitRepoCache initialized in {d} ms", .{cache_time - inited});
     libgit2_initialized = true;
 }
 
@@ -273,53 +278,87 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
 }
 
 fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        std.log.debug(
+            "fillFileStats took {d} ms",
+            .{end_time - start_time},
+        );
+    }
+
+    const Payload = struct {
+        idx: usize = 0,
+        res: *GitStatus,
+    };
+
+    var payload = Payload{ .res = res };
+
+    const cb = struct {
+        fn call(
+            path: [*c]const u8,
+            status: c_uint,
+            payload_ptr: ?*anyopaque,
+        ) callconv(.c) c_int {
+            _ = path;
+
+            var p: *Payload = @ptrCast(@alignCast(payload_ptr.?));
+            p.idx += 1;
+            if (p.idx > 1000) return 1;
+
+            const r = p.res;
+
+            if ((status & git.GIT_STATUS_CONFLICTED) != 0)
+                r.setFlag(CONFLICTED);
+
+            if ((status & (git.GIT_STATUS_INDEX_NEW |
+                git.GIT_STATUS_INDEX_MODIFIED |
+                git.GIT_STATUS_INDEX_DELETED)) != 0)
+                r.setFlag(STAGED);
+
+            if ((status & (git.GIT_STATUS_INDEX_DELETED |
+                git.GIT_STATUS_WT_DELETED)) != 0)
+                r.setFlag(DELETED);
+
+            if ((status & (git.GIT_STATUS_WT_MODIFIED |
+                git.GIT_STATUS_WT_DELETED)) != 0)
+                r.setFlag(UNSTAGED);
+
+            if ((status & git.GIT_STATUS_WT_NEW) != 0)
+                r.setFlag(UNTRACKED);
+
+            const all =
+                STAGED | UNSTAGED | UNTRACKED | DELETED | CONFLICTED;
+            if (r.flags == all) return 1;
+
+            return 0;
+        }
+    }.call;
+
     var status_options = std.mem.zeroInit(git.git_status_options, .{});
     status_options.version = git.GIT_STATUS_OPTIONS_VERSION;
-    status_options.flags = git.GIT_STATUS_OPT_INCLUDE_UNTRACKED;
+    status_options.show = git.GIT_STATUS_SHOW_INDEX_AND_WORKDIR;
+    status_options.flags =
+        git.GIT_STATUS_OPT_INCLUDE_UNTRACKED |
+        git.GIT_STATUS_OPT_EXCLUDE_SUBMODULES |
+        git.GIT_STATUS_OPT_DISABLE_PATHSPEC_MATCH;
 
-    var status_list: ?*git.git_status_list = null;
-    if (git.git_status_list_new(&status_list, repo, &status_options) < 0) return error.GitStatusError;
-    defer git.git_status_list_free(status_list);
-
-    const count = @min(git.git_status_list_entrycount(status_list), 1000);
-    var i: usize = 0;
-    while (i < count) : (i += 1) {
-        const entry = git.git_status_byindex(status_list, i);
-        const s = entry.*.status;
-
-        // 检测冲突状态
-        if ((s & git.GIT_STATUS_CONFLICTED) != 0) {
-            res.setFlag(CONFLICTED);
-        }
-
-        // 统计 Staged (暂存区)
-        if ((s & (git.GIT_STATUS_INDEX_NEW | git.GIT_STATUS_INDEX_MODIFIED | git.GIT_STATUS_INDEX_DELETED)) != 0) {
-            res.setFlag(STAGED);
-        }
-
-        // deleted 文件单独统计
-        if ((s & (git.GIT_STATUS_INDEX_DELETED | git.GIT_STATUS_WT_DELETED)) != 0) {
-            res.setFlag(DELETED);
-        }
-
-        // 统计 Unstaged (已修改未暂存)
-        if ((s & (git.GIT_STATUS_WT_MODIFIED | git.GIT_STATUS_WT_DELETED)) != 0) {
-            res.setFlag(UNSTAGED);
-        }
-
-        // 统计 Untracked (未追踪)
-        if ((s & git.GIT_STATUS_WT_NEW) != 0) {
-            res.setFlag(UNTRACKED);
-        }
-
-        // Early exit optimization: if all flags are already set, we can exit early
-        if (res.flags == (STAGED | UNSTAGED | UNTRACKED | DELETED | CONFLICTED)) {
-            break;
-        }
+    if (git.git_status_foreach_ext(
+        repo,
+        &status_options,
+        cb,
+        &payload,
+    ) < 0) {
+        return error.GitStatusError;
     }
 }
 
 fn fillStashStats(repo: *git.git_repository, res: *GitStatus) !void {
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        std.log.debug("fillStashStats took {d} ms", .{end_time - start_time});
+    }
     // 使用 git_revparse_single 检查是否存在 stash ref
     var object: ?*git.git_object = null;
     defer {
@@ -336,6 +375,11 @@ fn fillStashStats(repo: *git.git_repository, res: *GitStatus) !void {
 }
 
 fn fillPushPullStats(repo: *git.git_repository, res: *GitStatus) !void {
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        std.log.debug("fillPushPullStats took {d} ms", .{end_time - start_time});
+    }
     var head: ?*git.git_reference = null;
     // 获取当前 HEAD
     if (git.git_repository_head(&head, repo) < 0) return;

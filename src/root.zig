@@ -192,7 +192,7 @@ pub const App = struct {
 
     /// Write the prompt symbol with appropriate color based on exit code
     fn writePromptSymbol(self: *App, writer: *std.Io.Writer) !void {
-        const prompt_symbol = "󱙝";
+        const prompt_symbol = "󱙝 ";
 
         if (self.shell_state.last_exit_code) |code| {
             if (std.mem.eql(u8, code, "0")) {

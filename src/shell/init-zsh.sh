@@ -50,4 +50,4 @@ fi
 
 # 开启变量替换并设置 PROMPT
 setopt PROMPT_SUBST
-PROMPT='$(_starsheep_get_prompt) '
+PROMPT='$(_starsheep_get_prompt)'
