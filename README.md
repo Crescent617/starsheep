@@ -25,7 +25,21 @@ A blazingly fast, customizable shell prompt generator written in Zig. Starsheep 
 
 ### Installation
 
+#### Option 1: Homebrew (macOS/Linux)
+
 ```bash
+brew install --HEAD crescent617/tap/starsheep
+
+# Initialize starsheep
+eval "$(starsheep init zsh)"
+```
+
+#### Option 2: Build from Source
+
+```bash
+# Build the project
+zig build -Doptimize=ReleaseSafe
+
 # Add starsheep to your PATH
 export PATH="$PATH:/path/to/starsheep/zig-out/bin"
 
