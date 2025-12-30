@@ -13,6 +13,8 @@ A blazingly fast, customizable shell prompt generator written in Zig. Starsheep 
 - **🌈 Beautiful Colors**: Full terminal color support with chameleon library
 - **🔌 Shell Integration**: Native zsh support with command duration tracking
 
+<img src="assets/starsheep.png" alt="Starsheep Demo" width="600" style="border-radius: 20px;"/>
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -89,6 +91,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## 🙏 Acknowledgments
 
+- Inspired by [starship](https://starship.rs/)
 - Built with [Zig](https://ziglang.org/)
 - Terminal colors powered by [chameleon](https://github.com/tr1ckydev/chameleon)
 - TOML parsing with [zig-toml](https://github.com/sam701/zig-toml)
