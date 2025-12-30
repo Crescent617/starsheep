@@ -188,7 +188,7 @@ pub const App = struct {
         const lastDur = try self.shell_state.lastDurationMs(self.alloc);
         defer self.alloc.free(lastDur);
         if (lastDur.len != 0) {
-            try self.formatter.gray().print(writer, "⏱ {s}", .{lastDur});
+            try self.formatter.gray().print(writer, "󱎫 {s}", .{lastDur});
         }
     }
 
