@@ -2,6 +2,7 @@ const std = @import("std");
 const toml = @import("toml");
 
 pub const AppConf = struct {
+    prompt_hint: []const u8 = "󱙝 ",
     cmds: []CmdConf = &[_]CmdConf{},
 
     pub fn fromToml(

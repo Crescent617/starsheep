@@ -74,6 +74,7 @@ pub const App = struct {
     alloc: std.mem.Allocator,
     formatter: chameleon.RuntimeChameleon,
     parsed_conf: ?toml.Parsed(Conf) = null,
+    conf: Conf = .{},
     shell_state: ShellState = .{},
     timeout_ms: u64 = 500, // TODO: make it works
 
@@ -114,9 +115,10 @@ pub const App = struct {
         var cmd_map = std.StringHashMap(*Cmd).init(self.alloc);
         defer cmd_map.deinit();
 
-        // 方法2: 使用指针算术
-        for (self.cmds.items, 0..) |_, i| {
-            _ = try cmd_map.put(self.cmds.items[i].name, &self.cmds.items[i]);
+        self.conf = cfg.*;
+
+        for (self.cmds.items) |*cmd| {
+            _ = try cmd_map.put(cmd.name, cmd);
         }
 
         for (cfg.cmds) |cmd_conf| {
@@ -202,19 +204,19 @@ pub const App = struct {
     }
 
     /// Write the prompt symbol with appropriate color based on exit code
-    fn writePromptSymbol(self: *App, writer: *std.Io.Writer) !void {
-        const prompt_symbol = "󱙝 ";
+    fn writePromptHint(self: *App, writer: *std.Io.Writer) !void {
+        const hint = self.conf.prompt_hint;
 
         if (self.shell_state.last_exit_code) |code| {
             if (std.mem.eql(u8, code, "0")) {
-                try self.formatter.green().print(writer, "{s}", .{prompt_symbol});
+                try self.formatter.green().print(writer, "{s}", .{hint});
             } else if (std.mem.eql(u8, code, "1")) {
-                try self.formatter.red().print(writer, "{s}", .{prompt_symbol});
+                try self.formatter.red().print(writer, "{s}", .{hint});
             } else {
-                try self.formatter.red().print(writer, "[{s}]{s}", .{ code, prompt_symbol });
+                try self.formatter.red().print(writer, "[{s}]{s}", .{ code, hint });
             }
         } else {
-            try self.formatter.green().print(writer, "{s}", .{prompt_symbol});
+            try self.formatter.green().print(writer, "{s}", .{hint});
         }
     }
 
@@ -263,7 +265,7 @@ pub const App = struct {
         try self.writeTiming(writer);
         _ = try writer.writeByte('\n');
         try self.writeJobCount(writer);
-        try self.writePromptSymbol(writer);
+        try self.writePromptHint(writer);
 
         // Get final buffer and write with shell-specific processing
         const buf_slice = buf.written();
