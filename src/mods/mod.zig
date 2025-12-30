@@ -40,7 +40,7 @@ pub const builtins = [_]Cmd{ .{
 }, .{
     .name = "nix-shell",
     .cmd = .{ .R = nixShell },
-    .format = "#[fg=cyan,bold]❄️$output",
+    .format = "#[fg=cyan,bold] $output",
 }, .{
     .name = "go",
     .cmd = .{ .R = goVer },
