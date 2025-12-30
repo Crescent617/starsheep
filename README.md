@@ -17,11 +17,7 @@ A blazingly fast, customizable shell prompt generator written in Zig. Starsheep 
 
 ## 🚀 Quick Start
 
-### Prerequisites
-
-- Zig 0.15.2 or higher
-- zsh shell
-- Git (for git module features)
+> NOTE: better to install a nerd font for proper symbol rendering. (e.g. [Maple Font](https://github.com/subframe7536/Maple-font))
 
 ### Installation
 
@@ -35,6 +31,12 @@ eval "$(starsheep init zsh)"
 ```
 
 #### Option 2: Build from Source
+
+**Prerequisites**
+
+- Zig 0.15.2 or higher
+- zsh shell
+- Git (for git module features)
 
 ```bash
 # Build the project
