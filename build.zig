@@ -161,7 +161,7 @@ pub fn build(b: *std.Build) void {
     mod.addImport("toml", toml.module("toml"));
 
     mod.link_libc = true;
-    mod.linkSystemLibrary("libgit2", .{});
+    mod.linkSystemLibrary("git2", .{});
 
     const yazap = b.dependency("yazap", .{});
     exe.root_module.addImport("yazap", yazap.module("yazap"));
