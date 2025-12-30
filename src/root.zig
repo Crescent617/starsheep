@@ -175,10 +175,10 @@ pub const App = struct {
     }
 
     /// Format and write command results to the writer
-    fn writeCommandResults(self: *App, writer: anytype, results: []const []const u8) !void {
-        for (self.cmds.items, results) |cmd, res| {
+    fn writeCommandResults(self: *App, writer: *std.Io.Writer, results: []const []const u8) !void {
+        for (self.cmds.items, results) |_, res| {
             if (res.len == 0) continue;
-            try fmt.format(self.alloc, cmd.format, res, &self.formatter, writer);
+            _ = try writer.writeAll(res);
             _ = try writer.writeByte(' ');
         }
     }

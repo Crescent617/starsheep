@@ -6,6 +6,7 @@ const std = @import("std");
 const fmt = @import("fmt.zig");
 const env = @import("env.zig");
 const log = std.log.scoped(.cmd);
+const chameleon = @import("chameleon");
 
 pub const Stats = struct {
     neesds_eval: bool = false,
@@ -50,7 +51,7 @@ pub fn needsEval(self: *Self, alloc: std.mem.Allocator) !bool {
 }
 
 /// Evaluate the 'when' condition and return any output
-pub fn eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
+fn _eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
     const start_time = std.time.milliTimestamp();
     defer {
         self.stats.eval_duration_ms = std.time.milliTimestamp() - start_time;
@@ -69,6 +70,36 @@ pub fn eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
             return cmd_fn(alloc);
         },
     }
+}
+
+pub fn eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
+    if (!self.stats.neesds_eval) {
+        return "";
+    }
+    const output = try self._eval(alloc);
+    if (output.len == 0) {
+        return output;
+    }
+
+    if (self.format) |fmt_str| {
+        defer alloc.free(output);
+
+        var c = chameleon.initRuntime(.{
+            .allocator = alloc,
+        });
+        defer c.deinit();
+
+        var arr = std.ArrayList(u8).empty;
+        errdefer arr.deinit(alloc);
+
+        var buf: [512]u8 = undefined;
+        var w = arr.writer(alloc).adaptToNewApi(&buf);
+
+        try fmt.format(alloc, fmt_str, output, &c, &w.new_interface);
+        try w.new_interface.flush();
+        return arr.toOwnedSlice(alloc);
+    }
+    return output;
 }
 
 test "Cmd needsEval test" {
