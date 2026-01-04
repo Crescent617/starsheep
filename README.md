@@ -66,6 +66,8 @@ starsheep init zsh
 Starsheep uses a TOML configuration file located at `~/.config/starsheep.toml`. Here's an example:
 
 ```toml
+prompt_hint = "󱙝 "
+
 [[cmds]]
 name = "time"
 cmd = "date +'%H:%M:%S'"
