@@ -1,3 +1,5 @@
+export VIRTUAL_ENV_DISABLE_PROMPT=1
+
 # 1. 记录命令开始时间
 _starsheep_preexec() {
     # 使用精度更高的 EPOCHREALTIME (秒.微秒)

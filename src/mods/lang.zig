@@ -13,19 +13,20 @@ pub fn pyVer(alloc: std.mem.Allocator) []const u8 {
     const ev = "VIRTUAL_ENV_PROMPT";
     const venv = std.posix.getenv(ev) orelse return "";
 
+    var ver: []const u8 = "";
+
     if (util.findFileUpwards(alloc, ".", ".python-version")) |p| {
         defer p.deinit(alloc);
-        const ver = std.fs.cwd().readFileAlloc(alloc, p.path, 256) catch "";
-        if (ver.len > 0) {
-            return ver;
-        }
+        ver = std.fs.cwd().readFileAlloc(alloc, p.path, 256) catch "";
+    } else {
+        ver = util.runSubprocess(alloc, &[_][]const u8{ "python3", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}', end='')" }) catch return "";
     }
 
-    // Only get major.minor version for faster execution
-    const ver = util.runSubprocess(alloc, &[_][]const u8{ "python3", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}', end='')" }) catch return "";
     defer alloc.free(ver);
 
-    return std.fmt.allocPrint(alloc, "{s}({s})", .{ ver, std.fs.path.basename(venv) }) catch return "";
+    const trimmed_venv = std.mem.trim(u8, venv, "()\n\r\t ");
+    const trimmed_ver = std.mem.trim(u8, ver, "\n\r\t ");
+    return std.fmt.allocPrint(alloc, "{s}({s})", .{ trimmed_ver, trimmed_venv }) catch return "";
 }
 
 pub fn goVer(alloc: std.mem.Allocator) []const u8 {
