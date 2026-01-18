@@ -9,6 +9,7 @@ const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
 pub const env = @import("env.zig");
 const ThreadCtx = @import("util/ThreadCtx.zig");
+const Arc = @import("util/types.zig").Arc;
 
 const git = @import("mods/git.zig");
 const log = std.log.scoped(.root);
@@ -141,39 +142,47 @@ pub const App = struct {
     /// Execute commands and collect their results
     fn executeCommands(self: *App, results: [][]const u8) !void {
         var wg = std.Thread.WaitGroup{};
+        var ctx: Arc(ThreadCtx) = try .init(self.alloc, .{});
+        defer ctx.release(self.alloc);
 
         // Second pass: evaluate commands that are needed
         for (self.cmds.items, results) |*cmd, *res| {
             if (!try cmd.needsEval(self.alloc)) continue;
 
             wg.spawnManager(struct {
-                fn f(alloc: std.mem.Allocator, c: *Cmd, result_ptr: *[]const u8) void {
+                fn f(cx: Arc(ThreadCtx), alloc: std.mem.Allocator, c: *Cmd, result_ptr: *[]const u8) void {
+                    defer cx.release(alloc);
+
                     const r = c.eval(alloc) catch {
-                        result_ptr.* = "";
                         return;
                     };
+                    if (cx.get().isDone()) return;
                     result_ptr.* = r;
                 }
-            }.f, .{ self.alloc, cmd, res });
+            }.f, .{ ctx.retain(), self.alloc, cmd, res });
         }
 
-        wg.wait();
-
-        for (self.cmds.items) |cmd| {
-            if (env.DEBUG_MODE and cmd.stats.neesds_eval and (cmd.stats.eval_duration_ms orelse 1) > 1) {
-                log.info("time usage: [{s}]\tcheck={d}ms\teval={d}ms", .{
-                    cmd.name,
-                    cmd.stats.check_duration_ms orelse 0,
-                    cmd.stats.eval_duration_ms orelse 0,
-                });
+        ctx.get().timedWait(std.time.ns_per_ms * self.timeout_ms, struct {
+            fn f(w: *std.Thread.WaitGroup) void {
+                w.wait();
             }
-
-            if (!cmd.stats.neesds_eval) continue;
-            if (cmd.stats.eval_duration_ms) |dur| {
-                if (dur > self.timeout_ms)
-                    log.warn("[{s}] took too long: {d} ms", .{ cmd.name, dur });
+        }.f, .{&wg}) catch {
+            for (self.cmds.items) |cmd| {
+                if (cmd.stats.neesds_eval and !cmd.stats.done)
+                    log.warn("[{s}] execute timeout: {d} ms", .{ cmd.name, self.timeout_ms });
             }
-        }
+        };
+
+        if (env.DEBUG_MODE)
+            for (self.cmds.items) |cmd| {
+                if (cmd.stats.neesds_eval and (cmd.stats.eval_duration_ms orelse 1) > 1) {
+                    log.info("time usage: [{s}]\tcheck={d}ms\teval={d}ms", .{
+                        cmd.name,
+                        cmd.stats.check_duration_ms orelse 0,
+                        cmd.stats.eval_duration_ms orelse 0,
+                    });
+                }
+            };
     }
 
     /// Format and write command results to the writer

@@ -26,7 +26,13 @@ pub fn timedWait(self: *Self, timeout_ns: u64, comptime f: anytype, args: anytyp
         std.log.debug("ThreadCtx.timedWait elapsed time: {d} ns", .{elapsed});
     }
 
-    const t = try std.Thread.spawn(.{}, f, args);
+    const t = try std.Thread.spawn(.{}, struct {
+        fn ff(ctx: *Self, comptime func: anytype, a: anytype) void {
+            @call(.auto, func, a);
+            ctx.signal();
+        }
+    }.ff, .{ self, f, args });
+
     t.detach();
 
     try self.cond.timedWait(&self.mu, timeout_ns);

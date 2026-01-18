@@ -12,6 +12,7 @@ pub const Stats = struct {
     neesds_eval: bool = false,
     check_duration_ms: ?i64 = null,
     eval_duration_ms: ?i64 = null,
+    done: bool = false,
 };
 
 name: []const u8,
@@ -55,6 +56,7 @@ fn _eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
     const start_time = std.time.milliTimestamp();
     defer {
         self.stats.eval_duration_ms = std.time.milliTimestamp() - start_time;
+        self.stats.done = true;
     }
 
     switch (self.cmd) {
