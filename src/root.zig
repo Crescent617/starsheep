@@ -168,14 +168,14 @@ pub const App = struct {
             }
         }.f, .{&wg}) catch {
             for (self.cmds.items) |cmd| {
-                if (cmd.stats.neesds_eval and !cmd.stats.done)
+                if (cmd.stats.needs_eval and !cmd.stats.done)
                     log.warn("[{s}] execute timeout: {d} ms", .{ cmd.name, self.timeout_ms });
             }
         };
 
         if (env.DEBUG_MODE)
             for (self.cmds.items) |cmd| {
-                if (cmd.stats.neesds_eval and (cmd.stats.eval_duration_ms orelse 1) > 1) {
+                if (cmd.stats.needs_eval and (cmd.stats.eval_duration_ms orelse 1) > 1) {
                     log.info("time usage: [{s}]\tcheck={d}ms\teval={d}ms", .{
                         cmd.name,
                         cmd.stats.check_duration_ms orelse 0,

@@ -21,7 +21,7 @@ pub fn format(
     while (i < fmt.len) {
         if (fmt[i] == '#') {
             // 1. 处理 #[fg=red,bg=black,bold]
-            if (fmt[i + 1] == '[') {
+            if (i + 1 < fmt.len and fmt[i + 1] == '[') {
                 if (std.mem.indexOfScalarPos(u8, fmt, i + 2, ']')) |end_idx| {
                     // 先打印之前缓存的内容
                     try c.print(w, "{s}", .{arr.items});
@@ -127,4 +127,22 @@ fn applyColor(c: *chameleon.RuntimeChameleon, color: []const u8, is_fg: bool) *c
         .whiteBright => if (is_fg) c.whiteBright() else c.bgWhiteBright(),
         .unknown => c,
     };
+}
+
+test "format panic on trailing hash" {
+    const allocator = std.testing.allocator;
+    var c = chameleon.initRuntime(.{ .allocator = allocator });
+    defer c.deinit();
+
+    var buf = std.ArrayList(u8).empty;
+    defer buf.deinit(allocator);
+
+    var scratch_buf: [512]u8 = undefined;
+    var w = buf.writer(allocator).adaptToNewApi(&scratch_buf);
+
+    // This should not panic
+    try format(allocator, "test#", "out", &c, &w.new_interface);
+    // Flush the buffered writer
+    try w.new_interface.flush();
+    try std.testing.expectEqualStrings("test#", buf.items);
 }

@@ -9,7 +9,7 @@ const log = std.log.scoped(.cmd);
 const chameleon = @import("chameleon");
 
 pub const Stats = struct {
-    neesds_eval: bool = false,
+    needs_eval: bool = false,
     check_duration_ms: ?i64 = null,
     eval_duration_ms: ?i64 = null,
     done: bool = false,
@@ -35,20 +35,20 @@ pub fn needsEval(self: *Self, alloc: std.mem.Allocator) !bool {
     switch (self.when) {
         .L => |s| {
             if (s.len == 0) {
-                self.stats.neesds_eval = true;
-                return self.stats.neesds_eval;
+                self.stats.needs_eval = true;
+                return self.stats.needs_eval;
             }
             // execute when_str and check exit code
             var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", s }, alloc);
             const exit_code = try process.spawnAndWait();
-            self.stats.neesds_eval = (exit_code.Exited == 0);
+            self.stats.needs_eval = (exit_code.Exited == 0);
         },
         .R => |f| {
-            self.stats.neesds_eval = f(alloc);
+            self.stats.needs_eval = f(alloc);
         },
     }
 
-    return self.stats.neesds_eval;
+    return self.stats.needs_eval;
 }
 
 /// Evaluate the 'when' condition and return any output
@@ -75,7 +75,7 @@ fn _eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
 }
 
 pub fn eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
-    if (!self.stats.neesds_eval) {
+    if (!self.stats.needs_eval) {
         return "";
     }
     const output = try self._eval(alloc);
@@ -154,27 +154,30 @@ test "Cmd eval test" {
     var cmd = Cmd{
         .name = "echo_test",
         .cmd = .{ .L = "echo Hello, World!" },
-        .when = .{ .L = "true" },
-        .format = "",
+        .when = .{ .R = func_when_true },
+        .format = null,
         .enabled = true,
     };
+    _ = try cmd.needsEval(std.testing.allocator);
     const output = try cmd.eval(std.testing.allocator);
     defer std.testing.allocator.free(output);
-    try std.testing.expectEqualStrings(output, "Hello, World!\n");
+    try std.testing.expectEqualStrings("Hello, World!\n", output);
 }
 
-fn func_cmd(_: std.mem.Allocator) []const u8 {
-    return "Function Output\n";
+fn func_cmd(alloc: std.mem.Allocator) []const u8 {
+    return alloc.dupe(u8, "Function Output\n") catch "";
 }
 
 test "Cmd eval with function test" {
     var cmd = Cmd{
         .name = "func_cmd_test",
         .cmd = .{ .R = func_cmd },
-        .when = .{ .L = "true" },
-        .format = "",
+        .when = .{ .R = func_when_true },
+        .format = null,
         .enabled = true,
     };
+    _ = try cmd.needsEval(std.testing.allocator);
     const output = try cmd.eval(std.testing.allocator);
-    try std.testing.expectEqualStrings(output, "Function Output\n");
+    defer std.testing.allocator.free(output);
+    try std.testing.expectEqualStrings("Function Output\n", output);
 }
