@@ -1,7 +1,8 @@
 const std = @import("std");
 const util = @import("util.zig");
+const Ctx = @import("../util/Ctx.zig");
 
-pub fn curDir(alloc: std.mem.Allocator) []const u8 {
+pub fn curDir(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
     // Get current working directory
     const cwd = std.fs.cwd().realpathAlloc(alloc, ".") catch return "|error|";
     defer alloc.free(cwd);
@@ -27,10 +28,10 @@ pub fn curDir(alloc: std.mem.Allocator) []const u8 {
     }
 
     // Fallback to regular current directory handling
-    return getCurrentDir(alloc) catch "|error|";
+    return getCurrentDir(ctx, alloc) catch "|error|";
 }
 
-fn getCurrentDir(allocator: std.mem.Allocator) ![]const u8 {
+fn getCurrentDir(_: Ctx, allocator: std.mem.Allocator) ![]const u8 {
     // 1. 获取当前工作目录的绝对路径
     const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
     errdefer allocator.free(cwd);

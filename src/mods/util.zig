@@ -43,15 +43,6 @@ pub fn existsFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, fi
     return false;
 }
 
-pub fn runSubprocess(allocator: std.mem.Allocator, cmd: []const []const u8) ![]const u8 {
-    const res = try std.process.Child.run(.{
-        .argv = cmd,
-        .allocator = allocator,
-    });
-    defer allocator.free(res.stderr);
-    return res.stdout;
-}
-
 test "existsFileUpwards finds file in parent directories" {
     const allocator = std.testing.allocator;
 

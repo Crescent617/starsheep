@@ -1,10 +1,11 @@
 const std = @import("std");
 const util = @import("util.zig");
+const Ctx = @import("../util/Ctx.zig");
 const git = @cImport({
     @cInclude("git2.h");
 });
 
-pub const Err = error{
+pub const Err = Ctx.Err || error{
     GitHeadError,
     GitStatusError,
 };
@@ -62,11 +63,11 @@ const GitRepoCache = struct {
     }
 };
 
-pub fn gitStatus(allocator: std.mem.Allocator) []const u8 {
+pub fn gitStatus(ctx: Ctx, allocator: std.mem.Allocator) []const u8 {
     ensureGit2Inited.call();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
-    const s = (getGitStatusCached(allocator) catch |err| {
+    const s = (getGitStatusCached(ctx, allocator) catch |err| {
         std.log.err("Failed to get git status: {}\n", .{err});
         return "";
     }) orelse return "";
@@ -77,7 +78,7 @@ pub fn gitStatus(allocator: std.mem.Allocator) []const u8 {
     };
 }
 
-pub fn gitState(allocotor: std.mem.Allocator) []const u8 {
+pub fn gitState(_: Ctx, allocotor: std.mem.Allocator) []const u8 {
     ensureGit2Inited.call();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
@@ -96,7 +97,7 @@ pub fn gitState(allocotor: std.mem.Allocator) []const u8 {
     return allocotor.dupe(u8, res) catch "";
 }
 
-pub fn gitBranch(allocator: std.mem.Allocator) []const u8 {
+pub fn gitBranch(_: Ctx, allocator: std.mem.Allocator) []const u8 {
     ensureGit2Inited.call();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
@@ -246,13 +247,13 @@ pub const GitStatus = struct {
 };
 
 // Cached version that uses the global repository cache
-fn getGitStatusCached(_: std.mem.Allocator) !?GitStatus {
+fn getGitStatusCached(ctx: Ctx, _: std.mem.Allocator) !?GitStatus {
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return null;
 
     const repo = git_repo_cache.?.repo;
     var res = GitStatus{};
 
-    try fillFileStats(repo, &res);
+    try fillFileStats(ctx, repo, &res);
     try fillPushPullStats(repo, &res);
     try fillStashStats(repo, &res);
     return res;
@@ -277,7 +278,7 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
     return res;
 }
 
-fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
+fn fillFileStats(ctx: Ctx, repo: *git.git_repository, res: *GitStatus) !void {
     const start_time = std.time.milliTimestamp();
     defer {
         const end_time = std.time.milliTimestamp();
@@ -288,11 +289,13 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
     }
 
     const Payload = struct {
+        ctx: Ctx,
         idx: usize = 0,
         res: *GitStatus,
+        err: ?Err = null,
     };
 
-    var payload = Payload{ .res = res };
+    var payload = Payload{ .res = res, .ctx = ctx };
 
     const cb = struct {
         fn call(
@@ -305,6 +308,10 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
             var p: *Payload = @ptrCast(@alignCast(payload_ptr.?));
             p.idx += 1;
             if (p.idx > 1000) return 1;
+            if (p.ctx.done()) {
+                p.err = p.ctx.err();
+                return 1;
+            }
 
             const r = p.res;
 
@@ -351,6 +358,7 @@ fn fillFileStats(repo: *git.git_repository, res: *GitStatus) !void {
     ) < 0) {
         return error.GitStatusError;
     }
+    if (payload.err) |e| return e;
 }
 
 fn fillStashStats(repo: *git.git_repository, res: *GitStatus) !void {

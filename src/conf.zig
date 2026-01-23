@@ -3,6 +3,7 @@ const toml = @import("toml");
 
 pub const AppConf = struct {
     prompt_hint: []const u8 = "󱙝 ",
+    timeout_ms: u32 = 500,
     cmds: []CmdConf = &[_]CmdConf{},
 
     pub fn fromToml(

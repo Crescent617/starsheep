@@ -10,16 +10,13 @@ Starsheep is a customizable shell prompt generator written in Zig, designed for 
 
 ```bash
 # Build the project
-zig build
+just build
+
+# show prompt
+just run
 
 # Run tests
-zig build test
-
-# Run the application
-zig build run
-
-# Install to zig-out/
-zig build install
+just test
 ```
 
 ## Architecture

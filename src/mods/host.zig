@@ -1,13 +1,14 @@
 const std = @import("std");
+const Ctx = @import("../util/Ctx.zig");
 
-pub fn username(alloc: std.mem.Allocator) []const u8 {
+pub fn username(_: Ctx, alloc: std.mem.Allocator) []const u8 {
     if (!std.process.hasEnvVarConstant("SSH_CONNECTION")) {
         return "";
     }
     return std.process.getEnvVarOwned(alloc, "USER") catch "";
 }
 
-pub fn hostname(alloc: std.mem.Allocator) []const u8 {
+pub fn hostname(_: Ctx, alloc: std.mem.Allocator) []const u8 {
     if (!std.process.hasEnvVarConstant("SSH_CONNECTION")) {
         return "";
     }

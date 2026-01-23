@@ -8,7 +8,7 @@ const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
 pub const env = @import("env.zig");
-const ThreadCtx = @import("util/ThreadCtx.zig");
+const Ctx = @import("util/Ctx.zig");
 const Arc = @import("util/types.zig").Arc;
 
 const git = @import("mods/git.zig");
@@ -77,7 +77,6 @@ pub const App = struct {
     parsed_conf: ?toml.Parsed(Conf) = null,
     conf: Conf = .{},
     shell_state: ShellState = .{},
-    timeout_ms: u64 = 500, // TODO: make it works
 
     const Self = @This();
 
@@ -142,37 +141,30 @@ pub const App = struct {
     /// Execute commands and collect their results
     fn executeCommands(self: *App, results: [][]const u8) !void {
         var wg = std.Thread.WaitGroup{};
-        var ctx: Arc(ThreadCtx) = try .init(self.alloc, .{});
-        defer ctx.release(self.alloc);
+        const ctx = Ctx.withTimeout(Ctx.root, self.conf.timeout_ms);
+        log.debug("Executing commands with timeout {d} ms", .{self.conf.timeout_ms});
 
         // Second pass: evaluate commands that are needed
         for (self.cmds.items, results) |*cmd, *res| {
             if (!try cmd.needsEval(self.alloc)) continue;
 
             wg.spawnManager(struct {
-                fn f(cx: Arc(ThreadCtx), alloc: std.mem.Allocator, c: *Cmd, result_ptr: *[]const u8) void {
-                    defer cx.release(alloc);
-
-                    const r = c.eval(alloc) catch {
+                fn f(cx: Ctx, alloc: std.mem.Allocator, c: *Cmd, result_ptr: *[]const u8) void {
+                    const r = c.eval(cx, alloc) catch {
                         return;
                     };
-                    if (cx.get().isDone()) return;
+                    // 主线程负责分配内存，确保正确管理
                     result_ptr.* = r;
                 }
-            }.f, .{ ctx.retain(), self.alloc, cmd, res });
+            }.f, .{ ctx, self.alloc, cmd, res });
         }
 
-        ctx.get().timedWait(std.time.ns_per_ms * self.timeout_ms, struct {
-            fn f(w: *std.Thread.WaitGroup) void {
-                w.wait();
-            }
-        }.f, .{&wg}) catch {
-            for (self.cmds.items) |cmd| {
-                if (cmd.stats.needs_eval and !cmd.stats.done)
-                    log.warn("[{s}] execute timeout: {d} ms", .{ cmd.name, self.timeout_ms });
-            }
-        };
+        wg.wait();
 
+        for (self.cmds.items) |cmd| {
+            if (cmd.stats.needs_eval and !cmd.stats.done)
+                log.warn("[{s}] execute timeout: {d} ms", .{ cmd.name, self.conf.timeout_ms });
+        }
         if (env.DEBUG_MODE)
             for (self.cmds.items) |cmd| {
                 if (cmd.stats.needs_eval and (cmd.stats.eval_duration_ms orelse 1) > 1) {

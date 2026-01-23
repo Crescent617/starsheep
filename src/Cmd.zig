@@ -7,6 +7,8 @@ const fmt = @import("fmt.zig");
 const env = @import("env.zig");
 const log = std.log.scoped(.cmd);
 const chameleon = @import("chameleon");
+const Ctx = @import("util/Ctx.zig");
+const run = @import("util/process.zig").run;
 
 pub const Stats = struct {
     needs_eval: bool = false,
@@ -16,7 +18,7 @@ pub const Stats = struct {
 };
 
 name: []const u8,
-cmd: Either([]const u8, *const fn (std.mem.Allocator) []const u8),
+cmd: Either([]const u8, *const fn (Ctx, std.mem.Allocator) []const u8),
 when: Either([]const u8, *const fn (std.mem.Allocator) bool) = .{ .L = "" },
 format: ?[]const u8 = null, // use tmux style format strings, e.g. #[fg=blue,bg=black,bold,underscore]
 enabled: bool = true,
@@ -52,8 +54,10 @@ pub fn needsEval(self: *Self, alloc: std.mem.Allocator) !bool {
 }
 
 /// Evaluate the 'when' condition and return any output
-fn _eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
+fn _eval(self: *Self, ctx: Ctx, alloc: std.mem.Allocator) ![]const u8 {
     const start_time = std.time.milliTimestamp();
+
+    errdefer self.stats.done = false;
     defer {
         self.stats.eval_duration_ms = std.time.milliTimestamp() - start_time;
         self.stats.done = true;
@@ -61,7 +65,8 @@ fn _eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
 
     switch (self.cmd) {
         .L => |cmd_str| {
-            const res = try std.process.Child.run(.{
+            const res = try run(.{
+                .ctx = ctx,
                 .argv = &[_][]const u8{ "sh", "-c", cmd_str },
                 .allocator = alloc,
             });
@@ -69,16 +74,16 @@ fn _eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
             return res.stdout;
         },
         .R => |cmd_fn| {
-            return cmd_fn(alloc);
+            return cmd_fn(ctx, alloc);
         },
     }
 }
 
-pub fn eval(self: *Self, alloc: std.mem.Allocator) ![]const u8 {
+pub fn eval(self: *Self, ctx: Ctx, alloc: std.mem.Allocator) ![]const u8 {
     if (!self.stats.needs_eval) {
         return "";
     }
-    const output = try self._eval(alloc);
+    const output = try self._eval(ctx, alloc);
     if (output.len == 0) {
         return output;
     }
@@ -159,12 +164,12 @@ test "Cmd eval test" {
         .enabled = true,
     };
     _ = try cmd.needsEval(std.testing.allocator);
-    const output = try cmd.eval(std.testing.allocator);
+    const output = try cmd.eval(.{}, std.testing.allocator);
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("Hello, World!\n", output);
 }
 
-fn func_cmd(alloc: std.mem.Allocator) []const u8 {
+fn func_cmd(_: Ctx, alloc: std.mem.Allocator) []const u8 {
     return alloc.dupe(u8, "Function Output\n") catch "";
 }
 
@@ -177,7 +182,7 @@ test "Cmd eval with function test" {
         .enabled = true,
     };
     _ = try cmd.needsEval(std.testing.allocator);
-    const output = try cmd.eval(std.testing.allocator);
+    const output = try cmd.eval(.{}, std.testing.allocator);
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualStrings("Function Output\n", output);
 }
