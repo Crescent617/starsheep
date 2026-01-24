@@ -8,6 +8,7 @@ const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
 pub const env = @import("env.zig");
+pub const time = @import("util/time.zig");
 const Ctx = @import("util/Ctx.zig");
 const Arc = @import("util/types.zig").Arc;
 
@@ -19,55 +20,6 @@ pub const ShellState = struct {
     last_exit_code: ?[]const u8 = null,
     last_duration_ms: ?[]const u8 = null,
     jobs: ?[]const u8 = null,
-
-    fn lastDurationMs(self: *ShellState, alloc: std.mem.Allocator) ![]const u8 {
-        if (self.last_duration_ms == null) {
-            return "";
-        }
-        const dur_str = self.last_duration_ms.?;
-        const dur_f = std.fmt.parseFloat(f64, dur_str) catch return "0";
-        var dur_ms: u32 = @intFromFloat(dur_f);
-
-        var arr: std.ArrayList(u8) = .empty;
-        defer arr.deinit(alloc);
-
-        const DAY = 1000 * 60 * 60 * 24;
-        const HOUR = 1000 * 60 * 60;
-        const MIN = 1000 * 60;
-        const SEC = 1000;
-
-        const writer = arr.writer(alloc);
-
-        if (dur_ms >= DAY) {
-            const days = dur_ms / DAY;
-            try writer.print("{d}d", .{days});
-            dur_ms %= DAY;
-        }
-
-        if (dur_ms >= HOUR) {
-            const hours = dur_ms / HOUR;
-            try writer.print("{d}h", .{hours});
-            dur_ms %= HOUR;
-        }
-
-        if (dur_ms >= MIN) {
-            const mins = dur_ms / MIN;
-            try writer.print("{d}m", .{mins});
-            dur_ms %= MIN;
-        }
-
-        if (dur_ms >= SEC) {
-            const secs = dur_ms / SEC;
-            try writer.print("{d}s", .{secs});
-            dur_ms %= SEC;
-        }
-
-        // 只有在无其他单位且 > 100ms 时显示
-        if (dur_ms > 100 and arr.items.len == 0) {
-            try writer.print("{d}ms", .{dur_ms});
-        }
-        return try arr.toOwnedSlice(alloc);
-    }
 };
 
 pub const App = struct {
@@ -188,7 +140,7 @@ pub const App = struct {
 
     /// Write timing information if available
     fn writeTiming(self: *App, writer: *std.Io.Writer) !void {
-        const lastDur = try self.shell_state.lastDurationMs(self.alloc);
+        const lastDur = try time.formatDurationMs(self.alloc, self.shell_state.last_duration_ms);
         defer self.alloc.free(lastDur);
         if (lastDur.len != 0) {
             try self.formatter.gray().print(writer, "󱎫 {s}", .{lastDur});
