@@ -272,7 +272,7 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
     defer git.git_repository_free(repo);
 
     var res = GitStatus{};
-    try fillFileStats(repo.?, &res);
+    try fillFileStats(.{}, repo.?, &res);
     try fillPushPullStats(repo.?, &res);
     try fillStashStats(repo.?, &res);
     return res;
@@ -429,7 +429,7 @@ test "fetchGitStatus" {
     if (result) |status| {
         defer status.deinit(allocator);
 
-        std.debug.print("{}\n", .{status});
+        // std.debug.print("{}\n", .{status});
     }
 
     const nonGitResult = try getGitStatus(allocator, "/tmp");

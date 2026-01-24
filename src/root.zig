@@ -7,8 +7,8 @@ const chameleon = @import("chameleon");
 const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
-pub const env = @import("env.zig");
-pub const time = @import("util/time.zig");
+const env = @import("env.zig");
+const time = @import("util/time.zig");
 const Ctx = @import("util/Ctx.zig");
 const Arc = @import("util/types.zig").Arc;
 
@@ -228,5 +228,5 @@ pub const App = struct {
 
 test {
     // 这行代码会让 Zig 递归地去检查并运行上面所有被引用(public)容器里的测试
-    std.testing.refAllDecls(@This());
+    std.testing.refAllDeclsRecursive(@This());
 }

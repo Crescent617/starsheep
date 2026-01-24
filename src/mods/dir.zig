@@ -68,11 +68,8 @@ test "getCurrentDir returns path with ~ for home directory" {
     const home = try std.process.getEnvVarOwned(allocator, "HOME");
     defer allocator.free(home);
 
-    const result = try getCurrentDir(allocator);
+    const result = try getCurrentDir(.{}, allocator);
     defer allocator.free(result);
-
-    std.debug.print("Original CWD: {s}\n", .{original_cwd});
-    std.debug.print("After getCurrentDir: {s}\n", .{result});
 
     if (std.mem.startsWith(u8, result, "~")) {
         // 结果以 ~ 开头，符合预期
