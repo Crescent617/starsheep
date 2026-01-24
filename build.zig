@@ -7,6 +7,11 @@ const std = @import("std");
 // build runner to parallelize the build automatically (and the cache system to
 // know when a step doesn't need to be re-run).
 pub fn build(b: *std.Build) void {
+    // Read version from build.zig.zon
+    const version = getVersion(b) catch |err| {
+        std.debug.print("Error reading version: {}\n", .{err});
+        std.process.exit(1);
+    };
     // Standard target options allow the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -82,6 +87,15 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+
+    // Pass version as a compile-time option
+    const version_option = b.option([]const u8, "version", "Application version");
+    const effective_version = version_option orelse version;
+
+    // Pass version via -D option
+    const version_str = b.addOptions();
+    version_str.addOption([]const u8, "app_version", effective_version);
+    exe.root_module.addImport("build_info", version_str.createModule());
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -165,4 +179,21 @@ pub fn build(b: *std.Build) void {
 
     const yazap = b.dependency("yazap", .{});
     exe.root_module.addImport("yazap", yazap.module("yazap"));
+}
+
+fn getVersion(b: *std.Build) ![]const u8 {
+    const zon_content = try std.fs.cwd().readFileAlloc(b.allocator, "build.zig.zon", 4096);
+    defer b.allocator.free(zon_content);
+
+    // Simple parser to extract version from build.zig.zon
+    const version_prefix = ".version = \"";
+    if (std.mem.indexOf(u8, zon_content, version_prefix)) |start_idx| {
+        const version_start = start_idx + version_prefix.len;
+        if (std.mem.indexOfPos(u8, zon_content, version_start, "\",")) |end_idx| {
+            // Need to duplicate the slice since zon_content will be freed
+            return b.dupe(zon_content[version_start..end_idx]);
+        }
+    }
+
+    return error.VersionNotFound;
 }

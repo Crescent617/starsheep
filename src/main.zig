@@ -4,6 +4,7 @@ const Arg = yazap.Arg;
 const starsheep = @import("starsheep");
 const shell = starsheep.shell;
 const builtin = @import("builtin");
+const build_info = @import("build_info");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = builtin.mode == .Debug }){};
@@ -30,6 +31,9 @@ pub fn main() !void {
     try init.addArg(Arg.positional("shell", "The shell type to generate the initialization script for", null));
     try r.addSubcommand(init);
 
+    const version_cmd = app.createCommand("version", "Print version information");
+    try r.addSubcommand(version_cmd);
+
     const matches = try app.parseProcess();
 
     if (matches.subcommandMatches("prompt")) |am| {
@@ -46,6 +50,11 @@ pub fn main() !void {
         } else {
             return error.UnsupportedShell;
         }
+    } else if (matches.subcommandMatches("version")) |_| {
+        const stdout = std.fs.File.stdout();
+        const version_str = build_info.app_version;
+        try stdout.writeAll(version_str);
+        try stdout.writeAll("\n");
     } else {
         try app.displayHelp();
     }
