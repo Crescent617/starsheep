@@ -89,6 +89,7 @@ pub fn build(b: *std.Build) void {
     });
 
     // Pass version as a compile-time option
+    // zig build -Dversion=0.1.0
     const version_option = b.option([]const u8, "version", "Application version");
     const effective_version = version_option orelse version;
 
@@ -182,18 +183,27 @@ pub fn build(b: *std.Build) void {
 }
 
 fn getVersion(b: *std.Build) ![]const u8 {
-    const zon_content = try std.fs.cwd().readFileAlloc(b.allocator, "build.zig.zon", 4096);
-    defer b.allocator.free(zon_content);
+    const file = try std.fs.cwd().openFile("build.zig.zon", .{});
+    defer file.close();
 
-    // Simple parser to extract version from build.zig.zon
+    var file_buf: [1024]u8 = undefined;
+    var file_reader = file.reader(&file_buf);
+    var reader = &file_reader.interface;
+
     const version_prefix = ".version = \"";
-    if (std.mem.indexOf(u8, zon_content, version_prefix)) |start_idx| {
-        const version_start = start_idx + version_prefix.len;
-        if (std.mem.indexOfPos(u8, zon_content, version_start, "\",")) |end_idx| {
-            // Need to duplicate the slice since zon_content will be freed
-            return b.dupe(zon_content[version_start..end_idx]);
+
+    while (true) {
+        const line = try reader.takeDelimiter('\n') orelse break;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (std.mem.startsWith(u8, trimmed, version_prefix)) {
+            // 找到类似 .version = "0.1.0", 的内容
+            const start = version_prefix.len;
+            // 查找结尾的 ",
+            if (std.mem.indexOfPos(u8, trimmed, start, "\",")) |end| {
+                // b.dupe 将结果复制到 Build 的 Arena 中，生命周期由构建系统管理
+                return b.dupe(trimmed[start..end]);
+            }
         }
     }
-
     return error.VersionNotFound;
 }
