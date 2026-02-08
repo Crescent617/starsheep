@@ -150,6 +150,7 @@ const UNTRACKED: u8 = 1 << 2; // 0b00000100
 const DELETED: u8 = 1 << 3; // 0b00001000
 const STASHED: u8 = 1 << 4; // 0b00010000
 const CONFLICTED: u8 = 1 << 5; // 0b00100000
+const RENAMED: u8 = 1 << 6; // 0b01000000
 
 pub const GitStatus = struct {
     flags: u8 = 0,
@@ -198,6 +199,10 @@ pub const GitStatus = struct {
         return self.isSet(CONFLICTED);
     }
 
+    fn renamed(self: *const GitStatus) bool {
+        return self.isSet(RENAMED);
+    }
+
     fn statusStr(self: *const GitStatus, alloc: std.mem.Allocator) ![]const u8 {
         const is_empty = std.meta.eql(self.*, GitStatus{});
         if (is_empty) {
@@ -220,6 +225,9 @@ pub const GitStatus = struct {
         }
         if (self.deleted()) {
             try buf.appendSlice(alloc, "✘");
+        }
+        if (self.renamed()) {
+            try buf.appendSlice(alloc, "»");
         }
         if (self.conflicted()) {
             try buf.appendSlice(alloc, " ");
@@ -320,7 +328,8 @@ fn fillFileStats(ctx: Ctx, repo: *git.git_repository, res: *GitStatus) !void {
 
             if ((status & (git.GIT_STATUS_INDEX_NEW |
                 git.GIT_STATUS_INDEX_MODIFIED |
-                git.GIT_STATUS_INDEX_DELETED)) != 0)
+                git.GIT_STATUS_INDEX_DELETED |
+                git.GIT_STATUS_INDEX_RENAMED)) != 0)
                 r.setFlag(STAGED);
 
             if ((status & (git.GIT_STATUS_INDEX_DELETED |
@@ -328,14 +337,19 @@ fn fillFileStats(ctx: Ctx, repo: *git.git_repository, res: *GitStatus) !void {
                 r.setFlag(DELETED);
 
             if ((status & (git.GIT_STATUS_WT_MODIFIED |
-                git.GIT_STATUS_WT_DELETED)) != 0)
+                git.GIT_STATUS_WT_DELETED |
+                git.GIT_STATUS_WT_RENAMED)) != 0)
                 r.setFlag(UNSTAGED);
 
             if ((status & git.GIT_STATUS_WT_NEW) != 0)
                 r.setFlag(UNTRACKED);
 
+            if ((status & (git.GIT_STATUS_INDEX_RENAMED |
+                git.GIT_STATUS_WT_RENAMED)) != 0)
+                r.setFlag(RENAMED);
+
             const all =
-                STAGED | UNSTAGED | UNTRACKED | DELETED | CONFLICTED;
+                STAGED | UNSTAGED | UNTRACKED | DELETED | CONFLICTED | RENAMED;
             if (r.flags == all) return 1;
 
             return 0;
@@ -348,7 +362,9 @@ fn fillFileStats(ctx: Ctx, repo: *git.git_repository, res: *GitStatus) !void {
     status_options.flags =
         git.GIT_STATUS_OPT_INCLUDE_UNTRACKED |
         git.GIT_STATUS_OPT_EXCLUDE_SUBMODULES |
-        git.GIT_STATUS_OPT_DISABLE_PATHSPEC_MATCH;
+        git.GIT_STATUS_OPT_DISABLE_PATHSPEC_MATCH |
+        git.GIT_STATUS_OPT_RENAMES_HEAD_TO_INDEX |
+        git.GIT_STATUS_OPT_RENAMES_INDEX_TO_WORKDIR;
 
     if (git.git_status_foreach_ext(
         repo,
