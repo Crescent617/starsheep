@@ -156,6 +156,9 @@ pub const GitStatus = struct {
     flags: u8 = 0,
     ahead: usize = 0,
     behind: usize = 0,
+    submodules: usize = 0,
+    submodules_dirty: usize = 0,
+    submodules_uninitialized: usize = 0,
 
     fn deinit(_: *const GitStatus, _: std.mem.Allocator) void {
         // noop
@@ -250,6 +253,15 @@ pub const GitStatus = struct {
                 try std.fmt.format(buf.writer(alloc), "{d}", .{self.behind});
             }
         }
+
+        // Submodule status: show count with S prefix, and indicators for issues
+        if (self.submodules > 0) {
+            try buf.appendSlice(alloc, "S");
+            try std.fmt.format(buf.writer(alloc), "{d}", .{self.submodules});
+            if (self.submodules_dirty > 0) try buf.appendSlice(alloc, "!");
+            if (self.submodules_uninitialized > 0) try buf.appendSlice(alloc, "?");
+        }
+
         return try buf.toOwnedSlice(alloc);
     }
 };
@@ -264,6 +276,7 @@ fn getGitStatusCached(ctx: Ctx, _: std.mem.Allocator) !?GitStatus {
     try fillFileStats(ctx, repo, &res);
     try fillPushPullStats(repo, &res);
     try fillStashStats(repo, &res);
+    try fillSubmoduleStats(repo, &res);
     return res;
 }
 
@@ -283,7 +296,45 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
     try fillFileStats(.{}, repo.?, &res);
     try fillPushPullStats(repo.?, &res);
     try fillStashStats(repo.?, &res);
+    try fillSubmoduleStats(repo.?, &res);
     return res;
+}
+
+fn fillSubmoduleStats(repo: *git.git_repository, res: *GitStatus) !void {
+    const start_time = std.time.milliTimestamp();
+    defer {
+        const end_time = std.time.milliTimestamp();
+        std.log.debug("fillSubmoduleStats took {d} ms", .{end_time - start_time});
+    }
+
+    const Payload = struct {
+        res: *GitStatus,
+        repo: *git.git_repository,
+    };
+
+    var payload = Payload{ .res = res, .repo = repo };
+
+    const cb = struct {
+        fn call(sm: ?*git.git_submodule, name: [*c]const u8, payload_ptr: ?*anyopaque) callconv(.c) c_int {
+            _ = sm;
+            var p: *Payload = @ptrCast(@alignCast(payload_ptr.?));
+            p.res.submodules += 1;
+
+            var status: c_uint = 0;
+            _ = git.git_submodule_status(&status, p.repo, name, git.GIT_SUBMODULE_IGNORE_UNSPECIFIED);
+
+            if ((status & git.GIT_SUBMODULE_STATUS_WD_UNINITIALIZED) != 0) {
+                p.res.submodules_uninitialized += 1;
+            }
+            if (git.GIT_SUBMODULE_STATUS_IS_WD_DIRTY(status)) {
+                p.res.submodules_dirty += 1;
+            }
+
+            return 0;
+        }
+    }.call;
+
+    _ = git.git_submodule_foreach(repo, cb, &payload);
 }
 
 fn fillFileStats(ctx: Ctx, repo: *git.git_repository, res: *GitStatus) !void {
