@@ -15,7 +15,13 @@ fn init() void {
     libgit2_initialized = true;
 }
 
-var ensureGit2Inited = std.once(init);
+/// One-time libgit2 initialization (replaces std.once, removed in zig 0.16).
+/// Not internally synchronized: App.init calls this on the main thread before
+/// any worker threads are spawned, afterwards calls only read the flag.
+pub fn ensureInit() void {
+    if (libgit2_initialized) return;
+    init();
+}
 
 pub fn deinit() void {
     if (git_repo_cache) |*cache| {
@@ -58,7 +64,7 @@ const GitRepoCache = struct {
 };
 
 pub fn gitStatus(allocator: std.mem.Allocator) []const u8 {
-    ensureGit2Inited.call();
+    ensureInit();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
     const s = (getGitStatusCached(allocator) catch |err| {
@@ -73,7 +79,7 @@ pub fn gitStatus(allocator: std.mem.Allocator) []const u8 {
 }
 
 pub fn gitState(allocotor: std.mem.Allocator) []const u8 {
-    ensureGit2Inited.call();
+    ensureInit();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
     const repo = git_repo_cache.?.repo;
@@ -92,7 +98,7 @@ pub fn gitState(allocotor: std.mem.Allocator) []const u8 {
 }
 
 pub fn gitBranch(allocator: std.mem.Allocator) []const u8 {
-    ensureGit2Inited.call();
+    ensureInit();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
     const repo = git_repo_cache.?.repo;
@@ -226,14 +232,14 @@ pub const GitStatus = struct {
             try buf.appendSlice(alloc, "󰁞");
             // Optionally append the number
             if (self.ahead > 1) {
-                try std.fmt.format(buf.writer(alloc), "{d}", .{self.ahead});
+                try buf.print(alloc, "{d}", .{self.ahead});
             }
         }
         if (self.behind > 0) {
             try buf.appendSlice(alloc, "󰁆");
             // Optionally append the number
             if (self.behind > 1) {
-                try std.fmt.format(buf.writer(alloc), "{d}", .{self.behind});
+                try buf.print(alloc, "{d}", .{self.behind});
             }
         }
         return try buf.toOwnedSlice(alloc);

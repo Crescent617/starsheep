@@ -5,6 +5,7 @@ const Either = @import("../util/types.zig").Either;
 const std = @import("std");
 const fmt = @import("../fmt.zig");
 const env = @import("../env.zig");
+const util = @import("util.zig");
 const log = std.log.scoped(.cmd);
 
 name: []const u8,
@@ -19,9 +20,9 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
         return false;
     }
 
-    const start_time = std.time.milliTimestamp();
+    const start_time = env.milliTimestamp();
     defer {
-        const end_time = std.time.milliTimestamp();
+        const end_time = env.milliTimestamp();
         const duration = end_time - start_time;
         if (duration > 1 and env.DEBUG_MODE)
             log.info("check\t'{s}'\ttook {}ms", .{ self.name, duration });
@@ -37,9 +38,12 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
                 return true;
             }
             // execute when_str and check exit code
-            var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", s }, alloc);
-            const exit_code = try process.spawnAndWait();
-            return exit_code.Exited == 0;
+            var child = try std.process.spawn(env.io, .{ .argv = &[_][]const u8{ "sh", "-c", s } });
+            const term = try child.wait(env.io);
+            return switch (term) {
+                .exited => |code| code == 0,
+                else => false,
+            };
         },
         .R => |f| {
             return f(alloc);
@@ -49,9 +53,9 @@ pub fn needsEval(self: *const Self, alloc: std.mem.Allocator) !bool {
 
 /// Evaluate the 'when' condition and return any output
 pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
-    const start_time = std.time.milliTimestamp();
+    const start_time = env.milliTimestamp();
     defer {
-        const end_time = std.time.milliTimestamp();
+        const end_time = env.milliTimestamp();
         const duration = end_time - start_time;
         if (duration > 1 and env.DEBUG_MODE)
             log.info("'{s}'\ttook {}ms", .{ self.name, duration });
@@ -63,12 +67,7 @@ pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
 
     switch (self.cmd) {
         .L => |cmd_str| {
-            const res = try std.process.Child.run(.{
-                .argv = &[_][]const u8{ "sh", "-c", cmd_str },
-                .allocator = alloc,
-            });
-            defer alloc.free(res.stderr);
-            return res.stdout;
+            return util.runSubprocess(alloc, &[_][]const u8{ "sh", "-c", cmd_str });
         },
         .R => |cmd_fn| {
             return cmd_fn(alloc);
@@ -77,6 +76,7 @@ pub fn eval(self: *const Self, alloc: std.mem.Allocator) ![]const u8 {
 }
 
 test "Cmd needsEval test" {
+    env.initForTest();
     var cmd1 = Cmd{
         .name = "test1",
         .cmd = .{ .L = "" },
@@ -107,6 +107,7 @@ fn func_when_false(_: std.mem.Allocator) bool {
 }
 
 test "Cmd needsEval with function test" {
+    env.initForTest();
     var cmd = Cmd{
         .name = "test_func",
         .cmd = .{ .L = "" },
@@ -123,6 +124,7 @@ test "Cmd needsEval with function test" {
 }
 
 test "Cmd eval test" {
+    env.initForTest();
     var cmd = Cmd{
         .name = "echo_test",
         .cmd = .{ .L = "echo Hello, World!" },
@@ -140,6 +142,7 @@ fn func_cmd(_: std.mem.Allocator) []const u8 {
 }
 
 test "Cmd eval with function test" {
+    env.initForTest();
     var cmd = Cmd{
         .name = "func_cmd_test",
         .cmd = .{ .R = func_cmd },

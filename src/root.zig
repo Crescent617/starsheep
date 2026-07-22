@@ -71,8 +71,11 @@ pub const App = struct {
 
     const Self = @This();
 
-    pub fn init(alloc: std.mem.Allocator) !App {
-        env.init();
+    pub fn init(alloc: std.mem.Allocator, init_: std.process.Init) !App {
+        env.init(init_);
+        // Eager one-time libgit2 init on the main thread, so worker threads
+        // spawned in executeCommands only ever read the initialized state.
+        git.ensureInit();
         var arr = std.ArrayList(Cmd).empty;
         try arr.appendSlice(alloc, &builtins);
 
@@ -201,7 +204,7 @@ pub const App = struct {
     }
 
     /// Write final prompt output with shell-specific processing
-    fn writeFinalOutput(self: *App, out: *std.io.Writer, content: []const u8) !void {
+    fn writeFinalOutput(self: *App, out: *std.Io.Writer, content: []const u8) !void {
         if (std.mem.eql(u8, self.shell_state.shell, "zsh")) {
             const final_str = try shell.wrapAnsiForZsh(self.alloc, content);
             defer self.alloc.free(final_str);
@@ -211,15 +214,15 @@ pub const App = struct {
         }
     }
 
-    pub fn run(self: *App, out: *std.io.Writer) !void {
-        const start_time = if (env.DEBUG_MODE) std.time.milliTimestamp() else 0;
+    pub fn run(self: *App, out: *std.Io.Writer) !void {
+        const start_time = if (env.DEBUG_MODE) env.milliTimestamp() else 0;
         defer if (env.DEBUG_MODE) {
-            const end_time = std.time.milliTimestamp();
+            const end_time = env.milliTimestamp();
             const duration = end_time - start_time;
             log.info("prompt generation took {d} ms", .{duration});
         };
 
-        var buf = std.io.Writer.Allocating.init(self.alloc);
+        var buf = std.Io.Writer.Allocating.init(self.alloc);
         defer buf.deinit();
 
         var writer = &buf.writer;

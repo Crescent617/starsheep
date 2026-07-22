@@ -3,6 +3,7 @@ const dir = @import("dir.zig");
 const git = @import("git.zig");
 const Cmd = @import("Cmd.zig");
 const util = @import("util.zig");
+const env = @import("../env.zig");
 
 pub const builtins = [_]Cmd{ .{
     .name = "user",
@@ -69,7 +70,8 @@ fn zigVer(alloc: std.mem.Allocator) []const u8 {
 
 fn pyVer(alloc: std.mem.Allocator) []const u8 {
     const ev = "VIRTUAL_ENV_PROMPT";
-    const venv = std.posix.getenv(ev) orelse return "";
+    const venv = env.getEnvAlloc(alloc, ev) orelse return "";
+    defer alloc.free(venv);
 
     // Only get major.minor version for faster execution
     const ver = util.runSubprocess(alloc, &[_][]const u8{ "python3", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}', end='')" }) catch return "";
@@ -80,7 +82,7 @@ fn pyVer(alloc: std.mem.Allocator) []const u8 {
 
 fn nixShell(alloc: std.mem.Allocator) []const u8 {
     const ev = "IN_NIX_SHELL";
-    const in_nix = std.process.getEnvVarOwned(alloc, ev) catch "";
+    const in_nix = env.getEnvAlloc(alloc, ev) orelse "";
     return in_nix;
 }
 
@@ -135,14 +137,14 @@ fn nodeVer(alloc: std.mem.Allocator) []const u8 {
 }
 
 fn username(alloc: std.mem.Allocator) []const u8 {
-    if (!std.process.hasEnvVarConstant("SSH_CONNECTION")) {
+    if (!env.hasEnv("SSH_CONNECTION")) {
         return "";
     }
-    return std.process.getEnvVarOwned(alloc, "USER") catch "";
+    return env.getEnvAlloc(alloc, "USER") orelse "";
 }
 
 fn hostname(alloc: std.mem.Allocator) []const u8 {
-    if (!std.process.hasEnvVarConstant("SSH_CONNECTION")) {
+    if (!env.hasEnv("SSH_CONNECTION")) {
         return "";
     }
     var buf: [std.c.HOST_NAME_MAX]u8 = undefined;
@@ -152,10 +154,9 @@ fn hostname(alloc: std.mem.Allocator) []const u8 {
 }
 
 fn httpProxy(alloc: std.mem.Allocator) []const u8 {
-    const http_proxy = std.process.getEnvVarOwned(alloc, "HTTP_PROXY") catch "";
-    if (http_proxy.len == 0) {
-        const https_proxy = std.process.getEnvVarOwned(alloc, "HTTPS_PROXY") catch "";
-        return https_proxy;
+    if (env.getEnvAlloc(alloc, "HTTP_PROXY")) |http_proxy| {
+        if (http_proxy.len != 0) return http_proxy;
+        alloc.free(http_proxy);
     }
-    return http_proxy;
+    return env.getEnvAlloc(alloc, "HTTPS_PROXY") orelse "";
 }

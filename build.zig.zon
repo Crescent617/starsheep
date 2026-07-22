@@ -25,30 +25,32 @@
     .fingerprint = 0x2a653da97d06538a, // Changing this has security and trust implications.
     // Tracks the earliest Zig version that the package considers to be a
     // supported use case.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.16.0",
     // This field is optional.
     // Each dependency must either provide a `url` and `hash`, or a `path`.
     // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
     // Once all dependencies are fetched, `zig build` no longer requires
     // internet connectivity.
     .dependencies = .{
+        // VENDORED: tr1ckydev/chameleon has no zig 0.16 support upstream
+        // (std.process.hasEnvVarConstant removed). See vendor/chameleon.
         .chameleon = .{
-            .url = "git+https://github.com/tr1ckydev/chameleon#414169dede742d9ac8261d31b9fca6e31a1d7246",
-            .hash = "chameleon-2.0.1-ZOxajZ17AADmYCpHFqqoGfaXQiRkXM8B5lYJfir9tqsz",
+            .path = "vendor/chameleon",
         },
         .toml = .{
-            .url = "git+https://github.com/sam701/zig-toml#44318b82b961cb3c09a23924c2de80b9192213bd",
-            .hash = "toml-0.3.0-bV14BeiEAQBmkb-ywYhHxpBdt52ztkRmf-EVyEFbrTxt",
+            .url = "git+https://github.com/sam701/zig-toml#8685923e32e8b8a795eb2715684236975a70faed",
+            .hash = "toml-0.3.0-bV14BRmKAQAWR0FT0KUKFwVJTImaFhWjSe6HfSMtNZOH",
         },
         .yazap = .{
-            .url = "git+https://github.com/prajwalch/yazap#a920616e3a6676362735a2f5ae195ec320f058fb",
-            .hash = "yazap-0.6.3-Z1t-Emb0AQD_SkYf4dz_nEmAh9oRKiu6nexSJMGK3wcf",
+            .url = "git+https://github.com/prajwalch/yazap#82edda4aa180cc3aebf00b2c39a37975969eba0a",
+            .hash = "yazap-0.7.0-Z1t-EiT6AQDpbgaDQ1i_oBfnvmeH4AUM3WmiuTuXuQMN",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "vendor",
         // For example...
         //"LICENSE",
         //"README.md",

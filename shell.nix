@@ -1,10 +1,14 @@
 { pkgs ? import <nixpkgs> { } }:
 
+let
+  # zig 0.16（nixpkgs 没有 zig_0_16 时自动回退官方 tarball）
+  zig_0_16 = import ./zig-0_16.nix { inherit pkgs; };
+in
 pkgs.mkShell {
   # nativeBuildInputs 包含编译时需要的工具（运行在构建主机上的工具）
-  nativeBuildInputs = with pkgs; [
-    zig
-    pkg-config # 极度重要：Zig 靠它在 NixOS 中找到 libgit2 的头文件和库路径
+  nativeBuildInputs = [
+    zig_0_16
+    pkgs.pkg-config # 极度重要：Zig 靠它在 NixOS 中找到 libgit2 的头文件和库路径
   ];
 
   # buildInputs 包含程序链接时需要的库

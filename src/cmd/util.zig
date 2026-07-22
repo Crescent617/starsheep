@@ -1,7 +1,8 @@
 const std = @import("std");
+const env = @import("../env.zig");
 
 pub const PathInfo = struct {
-    stat: std.fs.File.Stat,
+    stat: std.Io.File.Stat,
     path: []const u8,
 
     pub fn deinit(self: *const PathInfo, allocator: std.mem.Allocator) void {
@@ -11,7 +12,7 @@ pub const PathInfo = struct {
 
 pub fn statFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?PathInfo {
     // 先规范化为绝对路径，避免 ".." 等造成判断异常
-    const p = std.fs.cwd().realpathAlloc(allocator, start_dir) catch return null;
+    const p = std.Io.Dir.cwd().realPathFileAlloc(env.io, start_dir, allocator) catch return null;
     defer allocator.free(p);
 
     var cur: []const u8 = p;
@@ -44,41 +45,48 @@ pub fn existsFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, fi
     return false;
 }
 
-fn statFile(allocator: std.mem.Allocator, base: []const u8, child: []const u8) ?std.fs.File.Stat {
+fn statFile(allocator: std.mem.Allocator, base: []const u8, child: []const u8) ?std.Io.File.Stat {
     const full = std.fs.path.join(allocator, &.{ base, child }) catch return null;
     defer allocator.free(full);
 
-    const stat = std.fs.cwd().statFile(full) catch {
+    const stat = std.Io.Dir.cwd().statFile(env.io, full, .{}) catch {
         return null;
     };
     return stat;
 }
 
-pub fn runSubprocess(allocator: std.mem.Allocator, cmd: []const []const u8) ![]const u8 {
-    const res = try std.process.Child.run(.{
-        .argv = cmd,
-        .allocator = allocator,
+pub fn runSubprocess(allocator: std.mem.Allocator, argv: []const []const u8) ![]const u8 {
+    var child = try std.process.spawn(env.io, .{
+        .argv = argv,
+        .stdout = .pipe,
+        .stderr = .pipe,
     });
-    defer allocator.free(res.stderr);
-    return res.stdout;
+    var buf: [4096]u8 = undefined;
+    var reader = child.stdout.?.reader(env.io, &buf);
+    const out = try reader.interface.allocRemaining(allocator, .unlimited);
+    // NOTE: stderr is not drained concurrently; commands are expected to only
+    // produce small outputs so the stderr pipe buffer never fills up.
+    _ = try child.wait(env.io);
+    return out;
 }
 
 test "existsFileUpwards finds file in parent directories" {
     const allocator = std.testing.allocator;
+    env.initForTest();
 
     // 创建临时目录结构
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
     // 创建文件在根目录
-    const marker_file = try tmp.dir.createFile("marker.txt", .{});
-    marker_file.close();
+    const marker_file = try tmp.dir.createFile(std.testing.io, "marker.txt", .{});
+    marker_file.close(std.testing.io);
 
     // 创建嵌套子目录
-    try tmp.dir.makePath("a/b/c");
+    try tmp.dir.createDirPath(std.testing.io, "a/b/c");
 
     // 获取深层目录的绝对路径
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(tmp_path);
 
     const deep_path = try std.fs.path.join(allocator, &.{ tmp_path, "a/b/c" });
@@ -91,18 +99,19 @@ test "existsFileUpwards finds file in parent directories" {
 
 test "existsFileUpwards finds dir in parent directories" {
     const allocator = std.testing.allocator;
+    env.initForTest();
 
     // 创建临时目录结构
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
     // 创建嵌套子目录
-    try tmp.dir.makePath("a/b/c");
+    try tmp.dir.createDirPath(std.testing.io, "a/b/c");
 
-    try tmp.dir.makePath("a/.git");
+    try tmp.dir.createDirPath(std.testing.io, "a/.git");
 
     // 获取深层目录的绝对路径
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(tmp_path);
 
     const deep_path = try std.fs.path.join(allocator, &.{ tmp_path, "a/b/c" });
@@ -115,13 +124,14 @@ test "existsFileUpwards finds dir in parent directories" {
 
 test "existsFileUpwards returns false when file not found" {
     const allocator = std.testing.allocator;
+    env.initForTest();
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makePath("subdir");
+    try tmp.dir.createDirPath(std.testing.io, "subdir");
 
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(tmp_path);
 
     const sub_path = try std.fs.path.join(allocator, &.{ tmp_path, "subdir" });
@@ -133,14 +143,15 @@ test "existsFileUpwards returns false when file not found" {
 
 test "existsFileUpwards finds file in current directory" {
     const allocator = std.testing.allocator;
+    env.initForTest();
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const file = try tmp.dir.createFile("local.txt", .{});
-    file.close();
+    const file = try tmp.dir.createFile(std.testing.io, "local.txt", .{});
+    file.close(std.testing.io);
 
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(tmp_path);
 
     const found = existsFileUpwards(allocator, tmp_path, "local.txt");
@@ -149,24 +160,25 @@ test "existsFileUpwards finds file in current directory" {
 
 test "existsFileUpwards with relative start_dir" {
     const allocator = std.testing.allocator;
+    env.initForTest();
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
     // 创建标记文件
-    const marker = try tmp.dir.createFile(".gitignore", .{});
-    marker.close();
+    const marker = try tmp.dir.createFile(std.testing.io, ".gitignore", .{});
+    marker.close(std.testing.io);
 
     // 创建子目录
-    try tmp.dir.makePath("src");
+    try tmp.dir.createDirPath(std.testing.io, "src");
 
     // 保存原始工作目录
-    var original_dir = try std.fs.cwd().openDir(".", .{});
-    defer original_dir.close();
+    var original_dir = try std.Io.Dir.cwd().openDir(std.testing.io, ".", .{});
+    defer original_dir.close(std.testing.io);
 
     // 切换到临时目录
-    try tmp.dir.setAsCwd();
-    defer original_dir.setAsCwd() catch {};
+    try std.process.setCurrentDir(std.testing.io, tmp.dir);
+    defer std.process.setCurrentDir(std.testing.io, original_dir) catch {};
 
     // 使用相对路径测试
     const found = existsFileUpwards(allocator, "src", ".gitignore");

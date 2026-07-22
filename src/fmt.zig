@@ -22,7 +22,7 @@ pub fn format(
         if (fmt[i] == '#') {
             // 1. 处理 #[fg=red,bg=black,bold]
             if (fmt[i + 1] == '[') {
-                if (std.mem.indexOfScalarPos(u8, fmt, i + 2, ']')) |end_idx| {
+                if (std.mem.findScalarPos(u8, fmt, i + 2, ']')) |end_idx| {
                     // 先打印之前缓存的内容
                     try c.print(w, "{s}", .{arr.items});
                     arr.clearRetainingCapacity();

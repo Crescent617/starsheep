@@ -4,7 +4,7 @@ const Arg = yazap.Arg;
 const starsheep = @import("starsheep");
 const shell = starsheep.shell;
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.page_allocator;
 
     var app = yazap.App.init(allocator, "starsheep", "A customizable shell prompt generator");
@@ -22,14 +22,14 @@ pub fn main() !void {
     try prompt.addArg(Arg.singleValueOptionWithValidValues("shell", null, "The shell type to generate the initialization script for", shells));
     try r.addSubcommand(prompt);
 
-    var init = app.createCommand("init", "Output shell initialization script");
-    try init.addArg(Arg.positional("shell", "The shell type to generate the initialization script for", null));
-    try r.addSubcommand(init);
+    var init_cmd = app.createCommand("init", "Output shell initialization script");
+    try init_cmd.addArg(Arg.positional("shell", "The shell type to generate the initialization script for", null));
+    try r.addSubcommand(init_cmd);
 
-    const matches = try app.parseProcess();
+    const matches = try app.parseProcess(init.io, init.minimal.args);
 
     if (matches.subcommandMatches("prompt")) |am| {
-        try promptMain(allocator, .{
+        try promptMain(allocator, init, .{
             .shell = am.getSingleValue("shell") orelse "zsh",
             .last_exit_code = am.getSingleValue("last-exit-code"),
             .last_duration_ms = am.getSingleValue("last-duration-ms"),
@@ -38,17 +38,20 @@ pub fn main() !void {
     } else if (matches.subcommandMatches("init")) |am| {
         const s = am.getSingleValue("shell") orelse return error.MissingArgument;
         if (std.mem.eql(u8, s, "zsh")) {
-            try std.fs.File.stdout().writeAll(shell.init_zsh_script);
+            var buf: [4096]u8 = undefined;
+            var writer = std.Io.File.stdout().writer(init.io, &buf);
+            defer writer.interface.flush() catch {};
+            try writer.interface.writeAll(shell.init_zsh_script);
         } else {
             return error.UnsupportedShell;
         }
     } else {
-        try app.displayHelp();
+        try app.displayHelp(init.io);
     }
 }
 
-fn promptMain(alloc: std.mem.Allocator, st: starsheep.ShellState) !void {
-    var app = try starsheep.App.init(alloc);
+fn promptMain(alloc: std.mem.Allocator, init: std.process.Init, st: starsheep.ShellState) !void {
+    var app = try starsheep.App.init(alloc, init);
     defer app.deinit();
 
     app.shell_state = st;
@@ -61,14 +64,14 @@ fn promptMain(alloc: std.mem.Allocator, st: starsheep.ShellState) !void {
     };
 
     var buf: [1024]u8 = undefined;
-    var writer = std.fs.File.stdout().writer(&buf);
+    var writer = std.Io.File.stdout().writer(init.io, &buf);
     defer writer.interface.flush() catch {};
 
     try app.run(&writer.interface);
 }
 
 fn getConfig(alloc: std.mem.Allocator) ![]const u8 {
-    const home_dir = try std.process.getEnvVarOwned(alloc, "HOME");
+    const home_dir = starsheep.env.getEnvAlloc(alloc, "HOME") orelse return error.EnvironmentVariableNotFound;
     defer alloc.free(home_dir);
     return std.fs.path.join(alloc, &.{ home_dir, ".config", "starsheep.toml" });
 }

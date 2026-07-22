@@ -1,9 +1,10 @@
 const std = @import("std");
 const util = @import("util.zig");
+const env = @import("../env.zig");
 
 pub fn curDir(alloc: std.mem.Allocator) []const u8 {
     // Get current working directory
-    const cwd = std.fs.cwd().realpathAlloc(alloc, ".") catch return "|error|";
+    const cwd = std.Io.Dir.cwd().realPathFileAlloc(env.io, ".", alloc) catch return "|error|";
     defer alloc.free(cwd);
 
     // Find .git directory upwards
@@ -32,16 +33,13 @@ pub fn curDir(alloc: std.mem.Allocator) []const u8 {
 
 fn getCurrentDir(allocator: std.mem.Allocator) ![]const u8 {
     // 1. 获取当前工作目录的绝对路径
-    const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
+    const cwd = try std.Io.Dir.cwd().realPathFileAlloc(env.io, ".", allocator);
     errdefer allocator.free(cwd);
 
     // 2. 获取 HOME 环境变量
     // 在 NixOS/Linux 上通常是 /home/username
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| {
-        if (err == error.EnvironmentVariableNotFound) {
-            return cwd; // 找不到 HOME，直接返回原路径
-        }
-        return err;
+    const home = env.getEnvAlloc(allocator, "HOME") orelse {
+        return cwd; // 找不到 HOME，直接返回原路径
     };
     defer allocator.free(home);
 
@@ -60,11 +58,12 @@ fn getCurrentDir(allocator: std.mem.Allocator) ![]const u8 {
 
 test "getCurrentDir returns path with ~ for home directory" {
     const allocator = std.testing.allocator;
+    env.initForTest();
 
-    const original_cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
+    const original_cwd = try std.Io.Dir.cwd().realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(original_cwd);
 
-    const home = try std.process.getEnvVarOwned(allocator, "HOME");
+    const home = env.getEnvAlloc(allocator, "HOME") orelse return error.EnvironmentVariableNotFound;
     defer allocator.free(home);
 
     const result = try getCurrentDir(allocator);
