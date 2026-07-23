@@ -38,6 +38,11 @@ pub fn deinit() void {
 var git_repo_cache: ?GitRepoCache = null;
 var libgit2_initialized = false;
 
+// git_branch/git_state/git_status 在线程池中并行执行，共享同一个
+// git_repository 指针；libgit2 不允许同一对象被多线程并发访问，
+// 用互斥锁把三个模块对 repo 的访问串行化
+var repo_mu: std.Thread.Mutex = .{};
+
 const GitRepoCache = struct {
     repo: *git.git_repository,
     path: []const u8,
@@ -67,6 +72,9 @@ pub fn gitStatus(ctx: Ctx, allocator: std.mem.Allocator) []const u8 {
     ensureGit2Inited.call();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
+    repo_mu.lock();
+    defer repo_mu.unlock();
+
     const s = (getGitStatusCached(ctx, allocator) catch |err| {
         std.log.err("Failed to get git status: {}\n", .{err});
         return "";
@@ -81,6 +89,9 @@ pub fn gitStatus(ctx: Ctx, allocator: std.mem.Allocator) []const u8 {
 pub fn gitState(_: Ctx, allocotor: std.mem.Allocator) []const u8 {
     ensureGit2Inited.call();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
+
+    repo_mu.lock();
+    defer repo_mu.unlock();
 
     const repo = git_repo_cache.?.repo;
 
@@ -101,12 +112,18 @@ pub fn gitBranch(_: Ctx, allocator: std.mem.Allocator) []const u8 {
     ensureGit2Inited.call();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
+    repo_mu.lock();
+    defer repo_mu.unlock();
+
     const repo = git_repo_cache.?.repo;
     var head: ?*git.git_reference = null;
     const head_err = git.git_repository_head(&head, repo);
 
-    // 处理空仓库情况（没有提交就没有 HEAD）
-    if (head_err == git.GIT_ENOTFOUND) return "empty";
+    // 处理空仓库情况（没有提交）：libgit2 对 unborn branch 返回
+    // GIT_EUNBORNBRANCH，对完全缺失的 HEAD 返回 GIT_ENOTFOUND。
+    // 注意必须分配内存：调用方会 free 返回值
+    if (head_err == git.GIT_ENOTFOUND or head_err == git.GIT_EUNBORNBRANCH)
+        return allocator.dupe(u8, "empty") catch "";
     if (head_err < 0) return "";
     defer git.git_reference_free(head);
 
@@ -233,7 +250,7 @@ pub const GitStatus = struct {
             try buf.appendSlice(alloc, "»");
         }
         if (self.conflicted()) {
-            try buf.appendSlice(alloc, " ");
+            try buf.appendSlice(alloc, "");
         }
         if (self.stashed()) {
             try buf.appendSlice(alloc, "$");
@@ -254,8 +271,8 @@ pub const GitStatus = struct {
             }
         }
 
-        // Submodule status: show count with S prefix, and indicators for issues
-        if (self.submodules > 0) {
+        // Submodule status: 干净时不显示，有问题时显示 S{总数} 加指示符
+        if (self.submodules_dirty > 0 or self.submodules_uninitialized > 0) {
             try buf.appendSlice(alloc, "S");
             try std.fmt.format(buf.writer(alloc), "{d}", .{self.submodules});
             if (self.submodules_dirty > 0) try buf.appendSlice(alloc, "!");
@@ -321,13 +338,26 @@ fn fillSubmoduleStats(repo: *git.git_repository, res: *GitStatus) !void {
             p.res.submodules += 1;
 
             var status: c_uint = 0;
-            _ = git.git_submodule_status(&status, p.repo, name, git.GIT_SUBMODULE_IGNORE_UNSPECIFIED);
+            // 查询失败时按干净处理
+            if (git.git_submodule_status(&status, p.repo, name, git.GIT_SUBMODULE_IGNORE_UNSPECIFIED) != 0)
+                return 0;
 
             if ((status & git.GIT_SUBMODULE_STATUS_WD_UNINITIALIZED) != 0) {
                 p.res.submodules_uninitialized += 1;
             }
-            if (git.GIT_SUBMODULE_STATUS_IS_WD_DIRTY(status)) {
+            // IS_WD_DIRTY 只覆盖 submodule 内部的脏文件，
+            // HEAD 移动 / 目录被删 / 新增未暂存也算 dirty
+            const wd_changed = (status & (git.GIT_SUBMODULE_STATUS_WD_MODIFIED |
+                git.GIT_SUBMODULE_STATUS_WD_DELETED |
+                git.GIT_SUBMODULE_STATUS_WD_ADDED)) != 0;
+            if (git.GIT_SUBMODULE_STATUS_IS_WD_DIRTY(status) or wd_changed) {
                 p.res.submodules_dirty += 1;
+            }
+            // 已暂存的 submodule 指针变更，复用主区域 STAGED 标志
+            if ((status & (git.GIT_SUBMODULE_STATUS_INDEX_ADDED |
+                git.GIT_SUBMODULE_STATUS_INDEX_DELETED |
+                git.GIT_SUBMODULE_STATUS_INDEX_MODIFIED)) != 0) {
+                p.res.setFlag(STAGED);
             }
 
             return 0;
@@ -482,6 +512,32 @@ fn fillPushPullStats(repo: *git.git_repository, res: *GitStatus) !void {
     if (git.git_graph_ahead_behind(&ahead, &behind, repo, local_oid, upstream_oid) == 0) {
         res.ahead = ahead;
         res.behind = behind;
+    }
+}
+
+test "statusStr submodule display" {
+    const alloc = std.testing.allocator;
+
+    // 干净的 submodule 不显示
+    {
+        const s = GitStatus{ .submodules = 2 };
+        const str = try s.statusStr(alloc);
+        defer alloc.free(str);
+        try std.testing.expectEqualStrings("", str);
+    }
+    // 脏 submodule 显示 S{总数}!
+    {
+        const s = GitStatus{ .submodules = 2, .submodules_dirty = 1 };
+        const str = try s.statusStr(alloc);
+        defer alloc.free(str);
+        try std.testing.expectEqualStrings("S2!", str);
+    }
+    // 未初始化 submodule 显示 S{总数}?
+    {
+        const s = GitStatus{ .submodules = 3, .submodules_uninitialized = 1 };
+        const str = try s.statusStr(alloc);
+        defer alloc.free(str);
+        try std.testing.expectEqualStrings("S3?", str);
     }
 }
 

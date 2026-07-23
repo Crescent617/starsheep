@@ -4,7 +4,8 @@ const Ctx = @import("../util/Ctx.zig");
 
 pub fn curDir(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
     // Get current working directory
-    const cwd = std.fs.cwd().realpathAlloc(alloc, ".") catch return "|error|";
+    // 注意：返回值会被调用方 free，不能用字符串字面量
+    const cwd = std.fs.cwd().realpathAlloc(alloc, ".") catch return alloc.dupe(u8, "|error|") catch "";
     defer alloc.free(cwd);
 
     // Find .git directory upwards
@@ -16,19 +17,19 @@ pub fn curDir(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
 
         // If current directory is the git root, return basename
         if (std.mem.eql(u8, cwd, git_root)) {
-            return alloc.dupe(u8, std.fs.path.basename(cwd)) catch "|error|";
+            return alloc.dupe(u8, std.fs.path.basename(cwd)) catch (alloc.dupe(u8, "|error|") catch "");
         }
 
         // If current directory is inside git repository, preserve relative path
         if (std.mem.startsWith(u8, cwd, git_root)) {
             // Calculate the relative path from git root
             const relative_path = cwd[git_root.len..];
-            return std.fs.path.join(alloc, &.{ std.fs.path.basename(git_root), relative_path }) catch "|error|";
+            return std.fs.path.join(alloc, &.{ std.fs.path.basename(git_root), relative_path }) catch (alloc.dupe(u8, "|error|") catch "");
         }
     }
 
     // Fallback to regular current directory handling
-    return getCurrentDir(ctx, alloc) catch "|error|";
+    return getCurrentDir(ctx, alloc) catch (alloc.dupe(u8, "|error|") catch "");
 }
 
 fn getCurrentDir(_: Ctx, allocator: std.mem.Allocator) ![]const u8 {
