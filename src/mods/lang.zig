@@ -23,6 +23,7 @@ pub fn pyVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
         ver = std.fs.cwd().readFileAlloc(alloc, p.path, 256) catch "";
     } else {
     const ver_res = run(.{ .ctx = ctx, .allocator = alloc, .argv = &[_][]const u8{ "python3", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}', end='')" } }) catch return "";
+        defer alloc.free(ver_res.stderr);
         ver = ver_res.stdout;
     }
 
@@ -40,15 +41,24 @@ pub fn goVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
     }
 
     const ver_res = run(.{ .ctx = ctx, .allocator = alloc, .argv = &[_][]const u8{ "go", "version" } }) catch return "";
-    const ver = ver_res.stdout;
-    defer alloc.free(ver);
+    defer alloc.free(ver_res.stdout);
+    defer alloc.free(ver_res.stderr);
 
-    // 输出类似 "go version go1.16.3 linux/amd64"
-    var iter = std.mem.tokenizeScalar(u8, ver, ' ');
+    const v = parseGoVersion(ver_res.stdout);
+    if (v.len == 0) return "";
+    return alloc.dupe(u8, v) catch return "";
+}
+
+/// 从 `go version` 输出（如 "go version go1.16.3 linux/amd64"）提取版本号。
+/// 返回输入的子切片；输出为空或格式异常时返回空串。
+fn parseGoVersion(raw: []const u8) []const u8 {
+    var iter = std.mem.tokenizeScalar(u8, raw, ' ');
     _ = iter.next(); // "go"
     _ = iter.next(); // "version"
-    if (iter.next()) |version_part| {
-        return alloc.dupe(u8, version_part[2..]) catch return "";
+    const token = iter.next() orelse return "";
+    // 正常是 "go1.16.3"；token 过短或没有 go 前缀时兜底，避免切片越界
+    if (token.len > 2 and std.mem.startsWith(u8, token, "go")) {
+        return token[2..];
     }
     return "";
 }
@@ -67,6 +77,7 @@ pub fn rustVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
     const ver_res = run(.{ .ctx = ctx, .allocator = alloc, .argv = &[_][]const u8{ "rustc", "--version" } }) catch return "";
     const ver = ver_res.stdout;
     defer alloc.free(ver);
+    defer alloc.free(ver_res.stderr);
 
     var iter = std.mem.tokenizeScalar(u8, ver, ' ');
     _ = iter.next(); // "rustc"
@@ -111,6 +122,7 @@ fn getRustupDirectVersion(ctx: Ctx, alloc: std.mem.Allocator) ![]const u8 {
     const ver_res = try run(.{ .ctx = ctx, .allocator = alloc, .argv = &[_][]const u8{ real_rustc_path, "--version" } });
     const ver = ver_res.stdout;
     defer alloc.free(ver);
+    defer alloc.free(ver_res.stderr);
 
     var iter = std.mem.tokenizeScalar(u8, ver, ' ');
     _ = iter.next();
@@ -125,9 +137,41 @@ pub fn nodeVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
     }
 
     const ver_res = run(.{ .ctx = ctx, .allocator = alloc, .argv = &[_][]const u8{ "node", "--version" } }) catch return "";
-    const ver = ver_res.stdout;
-    defer alloc.free(ver);
+    defer alloc.free(ver_res.stdout);
+    defer alloc.free(ver_res.stderr);
 
-    // 输出类似 "v14.17.0"
-    return alloc.dupe(u8, ver[1..]) catch return "";
+    const v = parseNodeVersion(ver_res.stdout);
+    if (v.len == 0) return "";
+    return alloc.dupe(u8, v) catch return "";
+}
+
+/// 从 `node --version` 输出（如 "v14.17.0"）提取版本号。
+/// 返回输入的子切片；node 缺失/输出为空时兜底返回空串，不切片越界。
+fn parseNodeVersion(raw: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+    if (trimmed.len == 0) return "";
+    if (trimmed[0] == 'v') return trimmed[1..];
+    return trimmed;
+}
+
+test "parseNodeVersion handles normal and broken output" {
+    try std.testing.expectEqualStrings("14.17.0", parseNodeVersion("v14.17.0\n"));
+    try std.testing.expectEqualStrings("22.5.1", parseNodeVersion("v22.5.1"));
+    // 无 v 前缀也接受
+    try std.testing.expectEqualStrings("14.17.0", parseNodeVersion("14.17.0"));
+    // node 缺失 / shim 失效 / 输出为空时兜底
+    try std.testing.expectEqualStrings("", parseNodeVersion(""));
+    try std.testing.expectEqualStrings("", parseNodeVersion("\n"));
+    try std.testing.expectEqualStrings("", parseNodeVersion("  \r\n"));
+    try std.testing.expectEqualStrings("", parseNodeVersion("v"));
+}
+
+test "parseGoVersion handles normal and broken output" {
+    try std.testing.expectEqualStrings("1.16.3", parseGoVersion("go version go1.16.3 linux/amd64"));
+    try std.testing.expectEqualStrings("1.22.0", parseGoVersion("go version go1.22.0 darwin/arm64\n"));
+    // go 缺失 / 输出为空 / 格式异常时兜底
+    try std.testing.expectEqualStrings("", parseGoVersion(""));
+    try std.testing.expectEqualStrings("", parseGoVersion("go version"));
+    try std.testing.expectEqualStrings("", parseGoVersion("go version go"));
+    try std.testing.expectEqualStrings("", parseGoVersion("go version x linux/amd64"));
 }

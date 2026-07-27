@@ -9,6 +9,9 @@ pub fn formatDurationMs(alloc: std.mem.Allocator, duration_ms: ?[]const u8) ![]c
     }
     const dur_str = duration_ms.?;
     const dur_f = std.fmt.parseFloat(f64, dur_str) catch return "";
+    // 防御负数 / NaN / 超出 u64 范围的输入，@intFromFloat 会直接 panic
+    if (!std.math.isFinite(dur_f) or dur_f < 0 or
+        dur_f >= @as(f64, @floatFromInt(std.math.maxInt(u64)))) return "";
     var dur_ms: u64 = @intFromFloat(dur_f);
 
     if (dur_ms == 0) {
@@ -73,6 +76,20 @@ test "formatDurationMs - zero milliseconds" {
 test "formatDurationMs - invalid input returns empty" {
     const alloc = std.testing.allocator;
     const result = try formatDurationMs(alloc, "invalid");
+    defer alloc.free(result);
+    try std.testing.expectEqualStrings("", result);
+}
+
+test "formatDurationMs - negative input returns empty" {
+    const alloc = std.testing.allocator;
+    const result = try formatDurationMs(alloc, "-100");
+    defer alloc.free(result);
+    try std.testing.expectEqualStrings("", result);
+}
+
+test "formatDurationMs - huge value returns empty instead of overflow panic" {
+    const alloc = std.testing.allocator;
+    const result = try formatDurationMs(alloc, "1e30");
     defer alloc.free(result);
     try std.testing.expectEqualStrings("", result);
 }
