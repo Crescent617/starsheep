@@ -35,7 +35,11 @@ pub fn curDir(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
 
 fn getCurrentDir(_: Ctx, allocator: std.mem.Allocator) ![]const u8 {
     // 1. 获取当前工作目录的绝对路径
-    const cwd = try std.Io.Dir.cwd().realPathFileAlloc(env.io(), ".", allocator);
+    // realPathFileAlloc 返回 [:0]u8，其底层分配比 slice 长 1（哨兵字节），
+    // 直接返回会在调用方 free 时长度对不上，这里转成普通 []u8
+    const raw = try std.Io.Dir.cwd().realPathFileAlloc(env.io(), ".", allocator);
+    defer allocator.free(raw);
+    const cwd = try allocator.dupe(u8, raw);
     errdefer allocator.free(cwd);
 
     // 2. 获取 HOME 环境变量
