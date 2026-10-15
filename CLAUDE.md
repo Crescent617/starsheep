@@ -48,8 +48,9 @@ Each module is a separate Zig file that implements a prompt segment:
 ## Dependencies
 
 - Zig 0.17.0+ (check build.zig.zon for exact version requirements)
-- External Zig packages: chameleon (colors), toml (config), yazap (CLI), libgit2 (git operations)
-- Development uses Nix (shell.nix, default.nix, dependencies.nix)
+- External Zig packages: chameleon (colors, Crescent617 fork 的 zig-0.17 分支，上游未适配), toml (config), yazap (CLI), translate-c (官方 C 翻译包，libgit2 头文件经 src/git2_shim.h 翻译；0.17 已移除 @cImport)
+- System library: libgit2（brew install libgit2；构建时 --search-prefix 指向其 prefix）
+- Development uses Nix (flake.nix, dependencies.nix); nixpkgs 的 zig 滞后，0.17 走 zig-overlay
 
 ## Testing
 
