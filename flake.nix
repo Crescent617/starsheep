@@ -46,10 +46,10 @@
             buildPhase = ''
               runHook preBuild
               export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-              # zig 0.17 的本地包目录：直接指向 zon2nix 生成的 linkFarm
+              # zig 0.17 的本地包目录：直接指向 zon2nix 格式的 linkFarm
               # translate-c 需要找到 libgit2 头文件，search-prefix 指向 nix store 路径
               zig build -Doptimize=ReleaseSafe --prefix $out \
-                --pkg-path ${deps} \
+                --pkg-dir ${deps} \
                 --search-prefix ${pkgs.libgit2}
               runHook postBuild
             '';
