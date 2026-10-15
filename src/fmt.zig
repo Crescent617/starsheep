@@ -134,15 +134,12 @@ test "format panic on trailing hash" {
     var c = chameleon.initRuntime(.{ .allocator = allocator });
     defer c.deinit();
 
-    var buf = std.ArrayList(u8).empty;
-    defer buf.deinit(allocator);
-
-    var scratch_buf: [512]u8 = undefined;
-    var w = buf.writer(allocator).adaptToNewApi(&scratch_buf);
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    defer aw.deinit();
 
     // This should not panic
-    try format(allocator, "test#", "out", &c, &w.new_interface);
+    try format(allocator, "test#", "out", &c, &aw.writer);
     // Flush the buffered writer
-    try w.new_interface.flush();
-    try std.testing.expectEqualStrings("test#", buf.items);
+    try aw.writer.flush();
+    try std.testing.expectEqualStrings("test#", aw.written());
 }

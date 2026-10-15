@@ -4,13 +4,16 @@
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    # nixpkgs 的 zig 版本滞后（0.15.x），0.17 走官方 overlay
+    zig-overlay.url = "github:mitchellh/zig-overlay";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, zig-overlay }:
     flake-utils.lib.eachDefaultSystem
       (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          zig = zig-overlay.packages.${system}."0.17.0";
 
           # 1. 提取共用的依赖项，避免在 packages 和 devShells 中重复写两遍
           commonBuildInputs = with pkgs; [
@@ -20,9 +23,9 @@
             libssh2
           ];
 
-          commonNativeBuildInputs = with pkgs; [
-            zig_0_15 # 开发和构建统一使用 0.15 版本
-            pkg-config
+          commonNativeBuildInputs = [
+            zig # 开发和构建统一使用 0.17 版本
+            pkgs.pkg-config
           ];
 
           # 导入依赖
@@ -33,7 +36,7 @@
         {
           packages.default = pkgs.stdenv.mkDerivation rec {
             pname = "starsheep";
-            version = "0.1.1";
+            version = "0.1.4";
             src = ./.;
 
             # 直接引用上面定义的列表
@@ -43,10 +46,11 @@
             buildPhase = ''
               runHook preBuild
               export ZIG_GLOBAL_CACHE_DIR=$TMPDIR/zig-cache
-              mkdir -p $ZIG_GLOBAL_CACHE_DIR/p
-              ln -s ${deps}/* $ZIG_GLOBAL_CACHE_DIR/p/
-
-              zig build -Doptimize=ReleaseSafe --prefix $out
+              # zig 0.17 的本地包目录：直接指向 zon2nix 生成的 linkFarm
+              # translate-c 需要找到 libgit2 头文件，search-prefix 指向 nix store 路径
+              zig build -Doptimize=ReleaseSafe --prefix $out \
+                --pkg-path ${deps} \
+                --search-prefix ${pkgs.libgit2}
               runHook postBuild
             '';
 

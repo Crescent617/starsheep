@@ -1,4 +1,5 @@
 const std = @import("std");
+const Translator = @import("translate_c").Translator;
 
 // Although this function looks imperative, it does not perform the build
 // directly and instead it mutates the build graph (`b`) that will be then
@@ -126,9 +127,7 @@ pub fn build(b: *std.Build) void {
 
     // This allows the user to pass arguments to the application in the build
     // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     // Creates an executable that will run `test` blocks from the provided module.
     // Here `mod` needs to define a target, which is why earlier we made sure to
@@ -178,22 +177,33 @@ pub fn build(b: *std.Build) void {
     mod.link_libc = true;
     mod.linkSystemLibrary("git2", .{});
 
+    // libgit2 头文件经官方 translate-c 包翻译为 Zig 模块（0.17 移除了 @cImport）
+    const translate_c = b.dependency("translate_c", .{});
+    const translator: Translator = .init(translate_c, .{
+        .c_source_file = b.path("src/git2_shim.h"),
+        .target = target,
+        .optimize = optimize,
+        .link_system_libs = &.{.{ .name = "git2" }},
+    });
+    // translate-c 是独立进程，不做 zig 的原生路径探测；
+    // 把 --search-prefix（如 Homebrew 的 /opt/homebrew）的 include 目录转发给它
+    for (b.graph.search_prefixes.items) |prefix| {
+        translator.addSystemIncludePath(.{ .cwd_relative = b.pathJoin(&.{ prefix, "include" }) });
+    }
+    mod.addImport("git2c", translator.mod);
+
     const yazap = b.dependency("yazap", .{});
     exe.root_module.addImport("yazap", yazap.module("yazap"));
 }
 
 fn getVersion(b: *std.Build) ![]const u8 {
-    const file = try std.fs.cwd().openFile("build.zig.zon", .{});
-    defer file.close();
-
-    var file_buf: [1024]u8 = undefined;
-    var file_reader = file.reader(&file_buf);
-    var reader = &file_reader.interface;
+    const io = b.graph.io;
+    const content = try std.Io.Dir.cwd().readFileAlloc(io, "build.zig.zon", b.allocator, .limited(4096));
 
     const version_prefix = ".version = \"";
 
-    while (true) {
-        const line = try reader.takeDelimiter('\n') orelse break;
+    var it = std.mem.splitScalar(u8, content, '\n');
+    while (it.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (std.mem.startsWith(u8, trimmed, version_prefix)) {
             // 找到类似 .version = "0.1.0", 的内容

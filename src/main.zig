@@ -3,14 +3,12 @@ const yazap = @import("yazap");
 const Arg = yazap.Arg;
 const starsheep = @import("starsheep");
 const shell = starsheep.shell;
-const builtin = @import("builtin");
 const build_info = @import("build_info");
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = builtin.mode == .Debug }){};
-    defer _ = gpa.deinit();
-
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
+    starsheep.env.setIo(io);
 
     var app = yazap.App.init(allocator, "starsheep", "A customizable shell prompt generator");
     defer app.deinit();
@@ -27,17 +25,19 @@ pub fn main() !void {
     try prompt.addArg(Arg.singleValueOptionWithValidValues("shell", null, "The shell type to generate the initialization script for", shells));
     try r.addSubcommand(prompt);
 
-    var init = app.createCommand("init", "Output shell initialization script");
-    try init.addArg(Arg.positional("shell", "The shell type to generate the initialization script for", null));
-    try r.addSubcommand(init);
+    var init_cmd = app.createCommand("init", "Output shell initialization script");
+    try init_cmd.addArg(Arg.positional("shell", "The shell type to generate the initialization script for", null));
+    try r.addSubcommand(init_cmd);
 
     const version_cmd = app.createCommand("version", "Print version information");
     try r.addSubcommand(version_cmd);
 
-    const matches = try app.parseProcess();
+    const matches = try app.parseProcess(io, init.minimal.args);
+
+    const stdout = std.Io.File.stdout();
 
     if (matches.subcommandMatches("prompt")) |am| {
-        try promptMain(allocator, .{
+        try promptMain(init, .{
             .shell = am.getSingleValue("shell") orelse "",
             .last_exit_code = am.getSingleValue("last-exit-code"),
             .last_duration_ms = am.getSingleValue("last-duration-ms"),
@@ -46,27 +46,28 @@ pub fn main() !void {
     } else if (matches.subcommandMatches("init")) |am| {
         const s = am.getSingleValue("shell") orelse return error.MissingArgument;
         if (std.mem.eql(u8, s, "zsh")) {
-            try std.fs.File.stdout().writeAll(shell.init_zsh_script);
+            try stdout.writeStreamingAll(io, shell.init_zsh_script);
         } else {
             return error.UnsupportedShell;
         }
     } else if (matches.subcommandMatches("version")) |_| {
-        const stdout = std.fs.File.stdout();
-        const version_str = build_info.app_version;
-        try stdout.writeAll(version_str);
-        try stdout.writeAll("\n");
+        try stdout.writeStreamingAll(io, build_info.app_version);
+        try stdout.writeStreamingAll(io, "\n");
     } else {
-        try app.displayHelp();
+        try app.displayHelp(io);
     }
 }
 
-fn promptMain(alloc: std.mem.Allocator, st: starsheep.ShellState) !void {
+fn promptMain(init: std.process.Init, st: starsheep.ShellState) !void {
+    const alloc = init.gpa;
+    const io = init.io;
+
     var app = try starsheep.App.init(alloc);
     defer app.deinit();
 
     app.shell_state = st;
 
-    const conf_path = try getConfig(alloc);
+    const conf_path = try getConfig(init);
     defer alloc.free(conf_path);
 
     app.applyConfigFile(conf_path) catch |err| {
@@ -74,14 +75,14 @@ fn promptMain(alloc: std.mem.Allocator, st: starsheep.ShellState) !void {
     };
 
     var buf: [1024]u8 = undefined;
-    var writer = std.fs.File.stdout().writer(&buf);
+    var writer = std.Io.File.stdout().writer(io, &buf);
     defer writer.interface.flush() catch {};
 
     try app.run(&writer.interface);
 }
 
-fn getConfig(alloc: std.mem.Allocator) ![]const u8 {
-    const home_dir = try std.process.getEnvVarOwned(alloc, "HOME");
-    defer alloc.free(home_dir);
-    return std.fs.path.join(alloc, &.{ home_dir, ".config", "starsheep.toml" });
+fn getConfig(init: std.process.Init) ![]const u8 {
+    const alloc = init.gpa;
+    const home_dir = init.environ_map.get("HOME") orelse return error.HomeNotFound;
+    return std.Io.Dir.path.join(alloc, &.{ home_dir, ".config", "starsheep.toml" });
 }

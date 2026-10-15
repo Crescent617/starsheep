@@ -1,5 +1,6 @@
 const std = @import("std");
 const toml = @import("toml");
+const env = @import("env.zig");
 
 pub const AppConf = struct {
     prompt_hint: []const u8 = "󱙝 ",
@@ -17,10 +18,7 @@ pub const AppConf = struct {
     }
 
     pub fn fromTomlFile(allocator: std.mem.Allocator, path: []const u8) !toml.Parsed(AppConf) {
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-
-        const content = try file.readToEndAlloc(allocator, 100 * 1024); // max 100KB
+        const content = try std.Io.Dir.cwd().readFileAlloc(env.io(), path, allocator, .limited(100 * 1024));
         defer allocator.free(content);
 
         return try AppConf.fromToml(allocator, content);

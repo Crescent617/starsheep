@@ -1,11 +1,12 @@
 const std = @import("std");
 const util = @import("util.zig");
+const env = @import("../env.zig");
 const Ctx = @import("../util/Ctx.zig");
 
 pub fn curDir(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
     // Get current working directory
     // 注意：返回值会被调用方 free，不能用字符串字面量
-    const cwd = std.fs.cwd().realpathAlloc(alloc, ".") catch return alloc.dupe(u8, "|error|") catch "";
+    const cwd = std.Io.Dir.cwd().realPathFileAlloc(env.io(), ".", alloc) catch return alloc.dupe(u8, "|error|") catch "";
     defer alloc.free(cwd);
 
     // Find .git directory upwards
@@ -13,18 +14,18 @@ pub fn curDir(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
         defer git_dir.deinit(alloc);
 
         // Get the git repository root (parent of .git)
-        const git_root = std.fs.path.dirname(git_dir.path) orelse "";
+        const git_root = std.Io.Dir.path.dirname(git_dir.path) orelse "";
 
         // If current directory is the git root, return basename
         if (std.mem.eql(u8, cwd, git_root)) {
-            return alloc.dupe(u8, std.fs.path.basename(cwd)) catch (alloc.dupe(u8, "|error|") catch "");
+            return alloc.dupe(u8, std.Io.Dir.path.basename(cwd)) catch (alloc.dupe(u8, "|error|") catch "");
         }
 
         // If current directory is inside git repository, preserve relative path
         if (std.mem.startsWith(u8, cwd, git_root)) {
             // Calculate the relative path from git root
             const relative_path = cwd[git_root.len..];
-            return std.fs.path.join(alloc, &.{ std.fs.path.basename(git_root), relative_path }) catch (alloc.dupe(u8, "|error|") catch "");
+            return std.Io.Dir.path.join(alloc, &.{ std.Io.Dir.path.basename(git_root), relative_path }) catch (alloc.dupe(u8, "|error|") catch "");
         }
     }
 
@@ -34,18 +35,14 @@ pub fn curDir(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
 
 fn getCurrentDir(_: Ctx, allocator: std.mem.Allocator) ![]const u8 {
     // 1. 获取当前工作目录的绝对路径
-    const cwd = try std.fs.cwd().realpathAlloc(allocator, ".");
+    const cwd = try std.Io.Dir.cwd().realPathFileAlloc(env.io(), ".", allocator);
     errdefer allocator.free(cwd);
 
     // 2. 获取 HOME 环境变量
     // 在 NixOS/Linux 上通常是 /home/username
-    const home = std.process.getEnvVarOwned(allocator, "HOME") catch |err| {
-        if (err == error.EnvironmentVariableNotFound) {
-            return cwd; // 找不到 HOME，直接返回原路径
-        }
-        return err;
+    const home = env.getenv("HOME") orelse {
+        return cwd; // 找不到 HOME，直接返回原路径
     };
-    defer allocator.free(home);
 
     // 3. 检查 cwd 是否以 home 开头
     if (std.mem.startsWith(u8, cwd, home)) {
@@ -54,7 +51,7 @@ fn getCurrentDir(_: Ctx, allocator: std.mem.Allocator) ![]const u8 {
 
         // 释放原始 cwd，分配带 ~ 的新字符串
         defer allocator.free(cwd);
-        return try std.fmt.allocPrint(allocator, "~{s}", .{relative_path});
+        return try allocator.print("~{s}", .{relative_path});
     }
 
     return cwd;

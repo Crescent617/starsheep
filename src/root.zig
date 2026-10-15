@@ -7,7 +7,7 @@ const chameleon = @import("chameleon");
 const fmt = @import("fmt.zig");
 const toml = @import("toml");
 pub const shell = @import("shell/mod.zig");
-const env = @import("env.zig");
+pub const env = @import("env.zig");
 const time = @import("util/time.zig");
 const Ctx = @import("util/Ctx.zig");
 const Arc = @import("util/types.zig").Arc;
@@ -92,7 +92,8 @@ pub const App = struct {
 
     /// Execute commands and collect their results
     fn executeCommands(self: *App, results: [][]const u8) !void {
-        var wg = std.Thread.WaitGroup{};
+        const io = env.io();
+        var group: std.Io.Group = .init;
         const ctx = Ctx.withTimeout(Ctx.root, self.conf.timeout_ms);
         log.debug("Executing commands with timeout {d} ms", .{self.conf.timeout_ms});
 
@@ -100,7 +101,7 @@ pub const App = struct {
         for (self.cmds.items, results) |*cmd, *res| {
             if (!try cmd.needsEval(self.alloc)) continue;
 
-            wg.spawnManager(struct {
+            group.async(io, struct {
                 fn f(cx: Ctx, alloc: std.mem.Allocator, c: *Cmd, result_ptr: *[]const u8) void {
                     const r = c.eval(cx, alloc) catch {
                         return;
@@ -111,7 +112,7 @@ pub const App = struct {
             }.f, .{ ctx, self.alloc, cmd, res });
         }
 
-        wg.wait();
+        group.await(io) catch {};
 
         for (self.cmds.items) |cmd| {
             if (cmd.stats.needs_eval and !cmd.stats.done)
@@ -174,7 +175,7 @@ pub const App = struct {
     }
 
     /// Write final prompt output with shell-specific processing
-    fn writeFinalOutput(self: *App, out: *std.io.Writer, content: []const u8) !void {
+    fn writeFinalOutput(self: *App, out: *std.Io.Writer, content: []const u8) !void {
         if (std.mem.eql(u8, self.shell_state.shell, "zsh")) {
             const final_str = try shell.wrapAnsiForZsh(self.alloc, content);
             defer self.alloc.free(final_str);
@@ -184,15 +185,15 @@ pub const App = struct {
         }
     }
 
-    pub fn run(self: *App, out: *std.io.Writer) !void {
-        const start_time = if (env.DEBUG_MODE) std.time.milliTimestamp() else 0;
+    pub fn run(self: *App, out: *std.Io.Writer) !void {
+        const start_time = if (env.DEBUG_MODE) std.Io.Clock.awake.now(env.io()).toMilliseconds() else 0;
         defer if (env.DEBUG_MODE) {
-            const end_time = std.time.milliTimestamp();
+            const end_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
             const duration = end_time - start_time;
             log.info("prompt generation took {d} ms", .{duration});
         };
 
-        var buf = std.io.Writer.Allocating.init(self.alloc);
+        var buf = std.Io.Writer.Allocating.init(self.alloc);
         defer buf.deinit();
 
         var writer = &buf.writer;
@@ -228,5 +229,5 @@ pub const App = struct {
 
 test {
     // 这行代码会让 Zig 递归地去检查并运行上面所有被引用(public)容器里的测试
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }

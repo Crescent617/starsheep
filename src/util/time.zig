@@ -18,15 +18,15 @@ pub fn formatDurationMs(alloc: std.mem.Allocator, duration_ms: ?[]const u8) ![]c
         return "";
     }
 
-    var arr: std.ArrayList(u8) = .empty;
-    defer arr.deinit(alloc);
+    var aw: std.Io.Writer.Allocating = .init(alloc);
+    defer aw.deinit();
 
     const DAY: u64 = 1000 * 60 * 60 * 24;
     const HOUR: u64 = 1000 * 60 * 60;
     const MIN: u64 = 1000 * 60;
     const SEC: u64 = 1000;
 
-    const writer = arr.writer(alloc);
+    const writer = &aw.writer;
 
     if (dur_ms >= DAY) {
         const days = dur_ms / DAY;
@@ -53,10 +53,10 @@ pub fn formatDurationMs(alloc: std.mem.Allocator, duration_ms: ?[]const u8) ![]c
     }
 
     // Only show milliseconds if > 100ms and no other units are displayed
-    if (dur_ms > 100 and arr.items.len == 0) {
+    if (dur_ms > 100 and aw.written().len == 0) {
         try writer.print("{d}ms", .{dur_ms});
     }
-    return try arr.toOwnedSlice(alloc);
+    return try aw.toOwnedSlice();
 }
 
 test "formatDurationMs - null input" {

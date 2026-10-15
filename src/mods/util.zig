@@ -1,4 +1,5 @@
 const std = @import("std");
+const env = @import("../env.zig");
 
 pub const FileInfo = struct {
     path: []const u8,
@@ -10,20 +11,20 @@ pub const FileInfo = struct {
 
 pub fn findFileUpwards(allocator: std.mem.Allocator, start_dir: []const u8, filename: []const u8) ?FileInfo {
     // 先规范化为绝对路径，避免 ".." 等造成判断异常
-    const p = std.fs.cwd().realpathAlloc(allocator, start_dir) catch return null;
+    const p = std.Io.Dir.cwd().realPathFileAlloc(env.io(), start_dir, allocator) catch return null;
     defer allocator.free(p);
 
     var cur: []const u8 = p;
 
     while (true) {
-        const file = std.fs.path.join(allocator, &.{ cur, filename }) catch return null;
-        if (std.fs.cwd().access(file, .{})) |_| return FileInfo{
+        const file = std.Io.Dir.path.join(allocator, &.{ cur, filename }) catch return null;
+        if (std.Io.Dir.cwd().access(env.io(), file, .{})) |_| return FileInfo{
             .path = file,
         } else |_| {
             defer allocator.free(file);
         }
 
-        const parent = std.fs.path.dirname(cur) orelse break;
+        const parent = std.Io.Dir.path.dirname(cur) orelse break;
 
         // 根目录时 dirname 往往返回自身，避免死循环
         if (std.mem.eql(u8, parent, cur)) break;

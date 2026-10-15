@@ -47,7 +47,7 @@ Each module is a separate Zig file that implements a prompt segment:
 
 ## Dependencies
 
-- Zig 0.15.2+ (check build.zig for exact version requirements)
+- Zig 0.17.0+ (check build.zig.zon for exact version requirements)
 - External Zig packages: chameleon (colors), toml (config), yazap (CLI), libgit2 (git operations)
 - Development uses Nix (shell.nix, default.nix, dependencies.nix)
 

@@ -24,14 +24,18 @@ format: ?[]const u8 = null, // use tmux style format strings, e.g. #[fg=blue,bg=
 enabled: bool = true,
 stats: Stats = .{},
 
+fn nowMs() i64 {
+    return std.Io.Clock.awake.now(env.io()).toMilliseconds();
+}
+
 pub fn needsEval(self: *Self, alloc: std.mem.Allocator) !bool {
     if (!self.enabled) {
         return false;
     }
 
-    const start_time = std.time.milliTimestamp();
+    const start_time = nowMs();
     defer {
-        self.stats.check_duration_ms = std.time.milliTimestamp() - start_time;
+        self.stats.check_duration_ms = nowMs() - start_time;
     }
 
     switch (self.when) {
@@ -41,9 +45,16 @@ pub fn needsEval(self: *Self, alloc: std.mem.Allocator) !bool {
                 return self.stats.needs_eval;
             }
             // execute when_str and check exit code
-            var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", s }, alloc);
-            const exit_code = try process.spawnAndWait();
-            self.stats.needs_eval = (exit_code.Exited == 0);
+            // 子进程标准流全部忽略，避免 when 命令的输出污染 prompt
+            const io = env.io();
+            var child = try std.process.spawn(io, .{
+                .argv = &[_][]const u8{ "sh", "-c", s },
+                .stdin = .ignore,
+                .stdout = .ignore,
+                .stderr = .ignore,
+            });
+            const term = try child.wait(io);
+            self.stats.needs_eval = term.success();
         },
         .R => |f| {
             self.stats.needs_eval = f(alloc);
@@ -55,11 +66,11 @@ pub fn needsEval(self: *Self, alloc: std.mem.Allocator) !bool {
 
 /// Evaluate the 'when' condition and return any output
 fn _eval(self: *Self, ctx: Ctx, alloc: std.mem.Allocator) ![]const u8 {
-    const start_time = std.time.milliTimestamp();
+    const start_time = nowMs();
 
     errdefer self.stats.done = false;
     defer {
-        self.stats.eval_duration_ms = std.time.milliTimestamp() - start_time;
+        self.stats.eval_duration_ms = nowMs() - start_time;
         self.stats.done = true;
     }
 
@@ -96,15 +107,12 @@ pub fn eval(self: *Self, ctx: Ctx, alloc: std.mem.Allocator) ![]const u8 {
         });
         defer c.deinit();
 
-        var arr = std.ArrayList(u8).empty;
-        errdefer arr.deinit(alloc);
+        var aw: std.Io.Writer.Allocating = .init(alloc);
+        errdefer aw.deinit();
 
-        var buf: [512]u8 = undefined;
-        var w = arr.writer(alloc).adaptToNewApi(&buf);
-
-        try fmt.format(alloc, fmt_str, output, &c, &w.new_interface);
-        try w.new_interface.flush();
-        return arr.toOwnedSlice(alloc);
+        try fmt.format(alloc, fmt_str, output, &c, &aw.writer);
+        try aw.writer.flush();
+        return aw.toOwnedSlice();
     }
     return output;
 }

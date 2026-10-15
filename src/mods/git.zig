@@ -1,9 +1,8 @@
 const std = @import("std");
 const util = @import("util.zig");
+const env = @import("../env.zig");
 const Ctx = @import("../util/Ctx.zig");
-const git = @cImport({
-    @cInclude("git2.h");
-});
+const git = @import("git2c");
 
 pub const Err = Ctx.Err || error{
     GitHeadError,
@@ -11,17 +10,21 @@ pub const Err = Ctx.Err || error{
 };
 
 fn init() void {
-    const start_time = std.time.milliTimestamp();
+    const start_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
     _ = git.git_libgit2_init();
-    const inited = std.time.milliTimestamp();
+    const inited = std.Io.Clock.awake.now(env.io()).toMilliseconds();
     std.log.debug("libgit2 initialized in {d} ms", .{inited - start_time});
     git_repo_cache = GitRepoCache.init();
-    const cache_time = std.time.milliTimestamp();
+    const cache_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
     std.log.debug("GitRepoCache initialized in {d} ms", .{cache_time - inited});
     libgit2_initialized = true;
 }
 
-var ensureGit2Inited = std.once(init);
+var init_once: @import("../util/Once.zig") = .{};
+
+fn ensureGit2Inited() void {
+    init_once.call(init);
+}
 
 pub fn deinit() void {
     if (git_repo_cache) |*cache| {
@@ -41,7 +44,7 @@ var libgit2_initialized = false;
 // git_branch/git_state/git_status 在线程池中并行执行，共享同一个
 // git_repository 指针；libgit2 不允许同一对象被多线程并发访问，
 // 用互斥锁把三个模块对 repo 的访问串行化
-var repo_mu: std.Thread.Mutex = .{};
+var repo_mu: std.Io.Mutex = .init;
 
 const GitRepoCache = struct {
     repo: *git.git_repository,
@@ -69,11 +72,11 @@ const GitRepoCache = struct {
 };
 
 pub fn gitStatus(ctx: Ctx, allocator: std.mem.Allocator) []const u8 {
-    ensureGit2Inited.call();
+    ensureGit2Inited();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
-    repo_mu.lock();
-    defer repo_mu.unlock();
+    repo_mu.lockUncancelable(env.io());
+    defer repo_mu.unlock(env.io());
 
     const s = (getGitStatusCached(ctx, allocator) catch |err| {
         std.log.err("Failed to get git status: {}\n", .{err});
@@ -87,11 +90,11 @@ pub fn gitStatus(ctx: Ctx, allocator: std.mem.Allocator) []const u8 {
 }
 
 pub fn gitState(_: Ctx, allocotor: std.mem.Allocator) []const u8 {
-    ensureGit2Inited.call();
+    ensureGit2Inited();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
-    repo_mu.lock();
-    defer repo_mu.unlock();
+    repo_mu.lockUncancelable(env.io());
+    defer repo_mu.unlock(env.io());
 
     const repo = git_repo_cache.?.repo;
 
@@ -109,11 +112,11 @@ pub fn gitState(_: Ctx, allocotor: std.mem.Allocator) []const u8 {
 }
 
 pub fn gitBranch(_: Ctx, allocator: std.mem.Allocator) []const u8 {
-    ensureGit2Inited.call();
+    ensureGit2Inited();
     if (git_repo_cache == null or !git_repo_cache.?.is_valid) return "";
 
-    repo_mu.lock();
-    defer repo_mu.unlock();
+    repo_mu.lockUncancelable(env.io());
+    defer repo_mu.unlock(env.io());
 
     const repo = git_repo_cache.?.repo;
     var head: ?*git.git_reference = null;
@@ -260,21 +263,21 @@ pub const GitStatus = struct {
             try buf.appendSlice(alloc, "󰁞");
             // Optionally append the number
             if (self.ahead > 1) {
-                try std.fmt.format(buf.writer(alloc), "{d}", .{self.ahead});
+                try buf.print(alloc, "{d}", .{self.ahead});
             }
         }
         if (self.behind > 0) {
             try buf.appendSlice(alloc, "󰁆");
             // Optionally append the number
             if (self.behind > 1) {
-                try std.fmt.format(buf.writer(alloc), "{d}", .{self.behind});
+                try buf.print(alloc, "{d}", .{self.behind});
             }
         }
 
         // Submodule status: 干净时不显示，有问题时显示 S{总数} 加指示符
         if (self.submodules_dirty > 0 or self.submodules_uninitialized > 0) {
             try buf.appendSlice(alloc, "S");
-            try std.fmt.format(buf.writer(alloc), "{d}", .{self.submodules});
+            try buf.print(alloc, "{d}", .{self.submodules});
             if (self.submodules_dirty > 0) try buf.appendSlice(alloc, "!");
             if (self.submodules_uninitialized > 0) try buf.appendSlice(alloc, "?");
         }
@@ -318,9 +321,9 @@ fn getGitStatus(_: std.mem.Allocator, path: []const u8) !?GitStatus {
 }
 
 fn fillSubmoduleStats(repo: *git.git_repository, res: *GitStatus) !void {
-    const start_time = std.time.milliTimestamp();
+    const start_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
     defer {
-        const end_time = std.time.milliTimestamp();
+        const end_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
         std.log.debug("fillSubmoduleStats took {d} ms", .{end_time - start_time});
     }
 
@@ -368,9 +371,9 @@ fn fillSubmoduleStats(repo: *git.git_repository, res: *GitStatus) !void {
 }
 
 fn fillFileStats(ctx: Ctx, repo: *git.git_repository, res: *GitStatus) !void {
-    const start_time = std.time.milliTimestamp();
+    const start_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
     defer {
-        const end_time = std.time.milliTimestamp();
+        const end_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
         std.log.debug(
             "fillFileStats took {d} ms",
             .{end_time - start_time},
@@ -459,9 +462,9 @@ fn fillFileStats(ctx: Ctx, repo: *git.git_repository, res: *GitStatus) !void {
 }
 
 fn fillStashStats(repo: *git.git_repository, res: *GitStatus) !void {
-    const start_time = std.time.milliTimestamp();
+    const start_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
     defer {
-        const end_time = std.time.milliTimestamp();
+        const end_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
         std.log.debug("fillStashStats took {d} ms", .{end_time - start_time});
     }
     // 使用 git_revparse_single 检查是否存在 stash ref
@@ -480,9 +483,9 @@ fn fillStashStats(repo: *git.git_repository, res: *GitStatus) !void {
 }
 
 fn fillPushPullStats(repo: *git.git_repository, res: *GitStatus) !void {
-    const start_time = std.time.milliTimestamp();
+    const start_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
     defer {
-        const end_time = std.time.milliTimestamp();
+        const end_time = std.Io.Clock.awake.now(env.io()).toMilliseconds();
         std.log.debug("fillPushPullStats took {d} ms", .{end_time - start_time});
     }
     var head: ?*git.git_reference = null;

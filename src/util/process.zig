@@ -1,96 +1,98 @@
 const std = @import("std");
 const mem = std.mem;
-const ArrayList = std.ArrayList;
 const Allocator = mem.Allocator;
-const ChildProcess = std.process.Child;
-const fs = std.fs;
 const Ctx = @import("Ctx.zig");
+const env = @import("../env.zig");
+
+pub const RunResult = struct {
+    stdout: []u8,
+    stderr: []u8,
+    term: std.process.Child.Term,
+};
 
 /// Spawns a child process, waits for it, collecting stdout and stderr, and then returns.
 /// If it succeeds, the caller owns result.stdout and result.stderr memory.
+/// 超过 ctx 截止时间后会 kill 子进程并返回 ctx 的错误。
 pub fn run(args: struct {
     ctx: Ctx,
     allocator: mem.Allocator,
     argv: []const []const u8,
     max_output_bytes: usize = 1024,
-}) !std.process.Child.RunResult {
-    var child = ChildProcess.init(args.argv, args.allocator);
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
+}) !RunResult {
+    const io = env.io();
 
-    var stdout: ArrayList(u8) = .empty;
-    defer stdout.deinit(args.allocator);
-    var stderr: ArrayList(u8) = .empty;
-    defer stderr.deinit(args.allocator);
+    var child = try std.process.spawn(io, .{
+        .argv = args.argv,
+        .stdin = .ignore,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
 
-    try child.spawn();
-    errdefer {
-        _ = child.kill() catch {};
+    // 看门狗线程：到达截止时间后 kill 子进程，
+    // 使管道 EOF、读取协程结束、wait 返回，整体按超时路径退出
+    var finished = std.atomic.Value(bool).init(false);
+    const ttl = args.ctx.ttl_ns();
+    const watchdog: ?std.Thread = if (ttl > 0 and ttl < std.time.ns_per_day)
+        std.Thread.spawn(.{}, watchdogMain, .{ &child, io, ttl, &finished }) catch null
+    else
+        null;
+    defer if (watchdog) |t| t.join();
+
+    var stdout_res: ReadResult = .{};
+    var stderr_res: ReadResult = .{};
+    var group: std.Io.Group = .init;
+    group.async(io, readToEnd, .{ io, child.stdout.?, args.allocator, args.max_output_bytes, &stdout_res });
+    group.async(io, readToEnd, .{ io, child.stderr.?, args.allocator, args.max_output_bytes, &stderr_res });
+    try group.await(io);
+
+    const term = try child.wait(io);
+    finished.store(true, .release);
+
+    if (stdout_res.err) |err| {
+        args.allocator.free(stdout_res.bytes);
+        args.allocator.free(stderr_res.bytes);
+        return err;
     }
-    try collectOutput(args.ctx, child, args.allocator, &stdout, &stderr, args.max_output_bytes);
+    if (stderr_res.err) |err| {
+        args.allocator.free(stdout_res.bytes);
+        args.allocator.free(stderr_res.bytes);
+        return err;
+    }
+    if (args.ctx.err()) |err| {
+        args.allocator.free(stdout_res.bytes);
+        args.allocator.free(stderr_res.bytes);
+        return err;
+    }
 
     return .{
-        .stdout = try stdout.toOwnedSlice(args.allocator),
-        .stderr = try stderr.toOwnedSlice(args.allocator),
-        .term = try child.wait(),
+        .stdout = stdout_res.bytes,
+        .stderr = stderr_res.bytes,
+        .term = term,
     };
 }
 
-/// Collect the output from the process's stdout and stderr. Will return once all output
-/// has been collected. This does not mean that the process has ended. `wait` should still
-/// be called to wait for and clean up the process.
-///
-/// The process must be started with stdout_behavior and stderr_behavior == .Pipe
-pub fn collectOutput(
-    ctx: Ctx,
-    child: ChildProcess,
-    /// Used for `stdout` and `stderr`.
-    allocator: Allocator,
-    stdout: *ArrayList(u8),
-    stderr: *ArrayList(u8),
-    max_output_bytes: usize,
-) !void {
-    var poller = std.Io.poll(allocator, enum { stdout, stderr }, .{
-        .stdout = child.stdout.?,
-        .stderr = child.stderr.?,
-    });
-    defer poller.deinit();
+const ReadResult = struct {
+    bytes: []u8 = &.{},
+    err: ?anyerror = null,
+};
 
-    const stdout_r = poller.reader(.stdout);
-    stdout_r.buffer = stdout.allocatedSlice();
-    stdout_r.seek = 0;
-    stdout_r.end = stdout.items.len;
-
-    const stderr_r = poller.reader(.stderr);
-    stderr_r.buffer = stderr.allocatedSlice();
-    stderr_r.seek = 0;
-    stderr_r.end = stderr.items.len;
-
-    defer {
-        stdout.* = .{
-            .items = stdout_r.buffer[0..stdout_r.end],
-            .capacity = stdout_r.buffer.len,
+/// 读管道直到 EOF。子进程被 kill 后管道自然 EOF，此函数随之返回。
+fn readToEnd(io: std.Io, file: std.Io.File, allocator: Allocator, max_bytes: usize, out: *ReadResult) std.Io.Cancelable!void {
+    var buf: [4096]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
+    // 允许恰好 max_bytes；超出则 allocRemaining 报 StreamTooLong
+    out.bytes = fr: {
+        const bytes = file_reader.interface.allocRemaining(allocator, .limited(max_bytes + 1)) catch |err| {
+            out.err = err;
+            return;
         };
-        stderr.* = .{
-            .items = stderr_r.buffer[0..stderr_r.end],
-            .capacity = stderr_r.buffer.len,
-        };
-        stdout_r.buffer = &.{};
-        stderr_r.buffer = &.{};
-    }
+        break :fr bytes;
+    };
+}
 
-    const timeout = ctx.ttl_ns();
-    if (timeout <= 0) {
-        return ctx.err().?;
-    }
-    while (try poller.pollTimeout(timeout)) {
-        if (ctx.done()) {
-            return ctx.err().?;
-        }
-        if (stdout_r.bufferedLen() > max_output_bytes)
-            return error.StdoutStreamTooLong;
-        if (stderr_r.bufferedLen() > max_output_bytes)
-            return error.StderrStreamTooLong;
+fn watchdogMain(child: *std.process.Child, io: std.Io, ttl_ns: u64, finished: *std.atomic.Value(bool)) void {
+    std.Io.sleep(io, .{ .nanoseconds = @intCast(ttl_ns) }, .awake) catch {};
+    if (!finished.load(.acquire)) {
+        child.kill(io);
     }
 }

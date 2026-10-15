@@ -34,7 +34,7 @@ eval "$(starsheep init zsh)"
 
 **Prerequisites**
 
-- Zig 0.15.2 or higher
+- Zig 0.17.0 or higher
 - zsh shell
 - Git (for git module features)
 

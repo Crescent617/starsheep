@@ -1,5 +1,6 @@
 const std = @import("std");
 const util = @import("util.zig");
+const env = @import("../env.zig");
 const Ctx = @import("../util/Ctx.zig");
 const run = @import("../util/process.zig").run;
 
@@ -13,14 +14,13 @@ pub fn zigVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
 }
 
 pub fn pyVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
-    const ev = "VIRTUAL_ENV_PROMPT";
-    const venv = std.posix.getenv(ev) orelse return "";
+    const venv = env.getenv("VIRTUAL_ENV_PROMPT") orelse return "";
 
     var ver: []const u8 = "";
 
     if (util.findFileUpwards(alloc, ".", ".python-version")) |p| {
         defer p.deinit(alloc);
-        ver = std.fs.cwd().readFileAlloc(alloc, p.path, 256) catch "";
+        ver = std.Io.Dir.cwd().readFileAlloc(env.io(), p.path, alloc, .limited(256)) catch "";
     } else {
     const ver_res = run(.{ .ctx = ctx, .allocator = alloc, .argv = &[_][]const u8{ "python3", "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}', end='')" } }) catch return "";
         defer alloc.free(ver_res.stderr);
@@ -31,7 +31,7 @@ pub fn pyVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
 
     const trimmed_venv = std.mem.trim(u8, venv, "()\n\r\t ");
     const trimmed_ver = std.mem.trim(u8, ver, "\n\r\t ");
-    return std.fmt.allocPrint(alloc, "{s}({s})", .{ trimmed_ver, trimmed_venv }) catch return "";
+    return alloc.print("{s}({s})", .{ trimmed_ver, trimmed_venv }) catch return "";
 }
 
 pub fn goVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
@@ -89,14 +89,13 @@ pub fn rustVer(ctx: Ctx, alloc: std.mem.Allocator) []const u8 {
 
 /// 尝试跳过 rustup shim，直接找到真实工具链二进制
 fn getRustupDirectVersion(ctx: Ctx, alloc: std.mem.Allocator) ![]const u8 {
-    const home = std.process.getEnvVarOwned(alloc, "HOME") catch return error.NoHome;
-    defer alloc.free(home);
+    const home = env.getenv("HOME") orelse return error.NoHome;
 
     // 读取 ~/.rustup/settings.toml
-    const settings_path = try std.fs.path.join(alloc, &[_][]const u8{ home, ".rustup", "settings.toml" });
+    const settings_path = try std.Io.Dir.path.join(alloc, &[_][]const u8{ home, ".rustup", "settings.toml" });
     defer alloc.free(settings_path);
 
-    const content = std.fs.cwd().readFileAlloc(alloc, settings_path, 8192) catch return error.NoSettings;
+    const content = std.Io.Dir.cwd().readFileAlloc(env.io(), settings_path, alloc, .limited(8192)) catch return error.NoSettings;
     defer alloc.free(content);
 
     var default_toolchain: ?[]const u8 = null;
@@ -115,7 +114,7 @@ fn getRustupDirectVersion(ctx: Ctx, alloc: std.mem.Allocator) ![]const u8 {
     defer alloc.free(tc);
 
     // 构建真实路径: ~/.rustup/toolchains/STABLE_NAME/bin/rustc
-    const real_rustc_path = try std.fs.path.join(alloc, &[_][]const u8{ home, ".rustup", "toolchains", tc, "bin", "rustc" });
+    const real_rustc_path = try std.Io.Dir.path.join(alloc, &[_][]const u8{ home, ".rustup", "toolchains", tc, "bin", "rustc" });
     defer alloc.free(real_rustc_path);
 
     // 使用绝对路径运行（不经过 PATH 搜索，不经过 shim）
